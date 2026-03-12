@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useDebugStore } from "../state/debugStore";
+import { recordDebugError } from "../state/debugStore";
 import { errorToMessage } from "../utils/errors";
 
 export interface ErrorResponse {
@@ -52,7 +52,7 @@ export async function invokeCommand<T>(
           args,
           errorObj,
         );
-        useDebugStore.getState().recordError({
+        recordDebugError({
           timestamp: new Date().toISOString(),
           command,
           args,
@@ -77,7 +77,7 @@ export async function invokeCommand<T>(
         command,
         args,
       );
-      useDebugStore.getState().recordError({
+      recordDebugError({
         timestamp: new Date().toISOString(),
         command,
         args,
@@ -101,7 +101,7 @@ export async function invokeCommand<T>(
       error,
     );
 
-    useDebugStore.getState().recordError({
+    recordDebugError({
       timestamp: new Date().toISOString(),
       command,
       args,

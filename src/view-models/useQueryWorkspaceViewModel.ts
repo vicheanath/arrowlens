@@ -81,6 +81,12 @@ export function useQueryWorkspaceViewModel() {
     if (activeTab) setSql(activeTab.sql);
   }, [activeTab?.id]);
 
+  useEffect(() => {
+    if (activeTab && activeTab.sql !== sql) {
+      updateTabSql(activeTab.id, sql);
+    }
+  }, [activeTab, sql, updateTabSql]);
+
   const onEditorSqlChange = (nextSql: string) => {
     if (!activeTab) return;
     updateTabSql(activeTab.id, nextSql);

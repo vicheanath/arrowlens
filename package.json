@@ -31,8 +31,7 @@
     "react-resizable-panels": "^2.1.7",
     "react-window": "^1.8.10",
     "recharts": "^2.12.7",
-    "tailwind-merge": "^2.5.4",
-    "zustand": "^5"
+    "tailwind-merge": "^2.5.4"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

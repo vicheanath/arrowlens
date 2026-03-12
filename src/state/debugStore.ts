@@ -1,5 +1,5 @@
-import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { usePersistentState } from "../hooks/usePersistentState";
 
 export interface DebugErrorEntry {
   timestamp: string;
@@ -22,20 +22,46 @@ interface DebugState {
   clearLastError: () => void;
 }
 
-export const useDebugStore = create<DebugState>()(
-  persist(
-    (set) => ({
-      debugMode: false,
-      lastError: null,
+const DebugContext = createContext<DebugState | null>(null);
 
-      setDebugMode: (value) => set({ debugMode: value }),
-      toggleDebugMode: () => set((state) => ({ debugMode: !state.debugMode })),
-      recordError: (entry) => set({ lastError: entry }),
-      clearLastError: () => set({ lastError: null }),
+let debugRecorder: ((entry: DebugErrorEntry) => void) | null = null;
+
+export function recordDebugError(entry: DebugErrorEntry) {
+  debugRecorder?.(entry);
+}
+
+export function DebugProvider({ children }: { children: React.ReactNode }) {
+  const [debugMode, setDebugMode] = usePersistentState<boolean>("arrowlens-debug-mode", false);
+  const [lastError, setLastError] = useState<DebugErrorEntry | null>(null);
+
+  useEffect(() => {
+    debugRecorder = (entry) => setLastError(entry);
+    return () => {
+      if (debugRecorder) {
+        debugRecorder = null;
+      }
+    };
+  }, []);
+
+  const value = useMemo(
+    () => ({
+      debugMode,
+      lastError,
+      setDebugMode,
+      toggleDebugMode: () => setDebugMode((current) => !current),
+      recordError: (entry: DebugErrorEntry) => setLastError(entry),
+      clearLastError: () => setLastError(null),
     }),
-    {
-      name: "arrowlens-debug-store",
-      partialize: (state) => ({ debugMode: state.debugMode }),
-    },
-  ),
-);
+    [debugMode, lastError, setDebugMode],
+  );
+
+  return React.createElement(DebugContext.Provider, { value }, children);
+}
+
+export function useDebugStore() {
+  const context = useContext(DebugContext);
+  if (!context) {
+    throw new Error("useDebugStore must be used within DebugProvider");
+  }
+  return context;
+}

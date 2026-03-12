@@ -1,7 +1,7 @@
-import { create } from "zustand";
+import React, { createContext, useContext, useMemo, useState } from "react";
 import { DatabaseConnectionInfo, DatabaseType } from "../models/database";
 import * as databaseService from "../services/databaseService";
-import { useToastStore } from "../utils/toast";
+import { useToast } from "../utils/toast";
 import { errorToMessage } from "../utils/errors";
 
 interface DatabaseState {
@@ -25,128 +25,126 @@ interface DatabaseState {
   clearError: () => void;
 }
 
-export const useDatabaseStore = create<DatabaseState>((set, get) => ({
-  connections: [],
-  selectedConnectionId: null,
-  tablesByConnection: {},
-  isLoading: false,
-  isLoadingTables: false,
-  error: null,
+const DatabaseContext = createContext<DatabaseState | null>(null);
 
-  loadConnections: async () => {
-    set({ isLoading: true, error: null });
-    try {
-      const connections = await databaseService.listDatabaseConnections();
-      const selectedConnectionId = get().selectedConnectionId;
-      const stillSelected =
-        selectedConnectionId && connections.some((c) => c.id === selectedConnectionId)
-          ? selectedConnectionId
-          : null;
-      set({ connections, selectedConnectionId: stillSelected, isLoading: false });
-    } catch (e) {
-      const errorMessage = errorToMessage(e);
-      set({ error: errorMessage, isLoading: false });
-      useToastStore.getState().addToast({
-        type: "error",
-        message: errorMessage,
-        title: "Failed to load database connections",
-      });
-    }
-  },
+export function DatabaseProvider({ children }: { children: React.ReactNode }) {
+  const [connections, setConnections] = useState<DatabaseConnectionInfo[]>([]);
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+  const [tablesByConnection, setTablesByConnection] = useState<Record<string, string[]>>({});
+  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingTables, setIsLoadingTables] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
-  connectDatabase: async (databaseType, connectionString, name) => {
-    set({ isLoading: true, error: null });
-    try {
-      const info = await databaseService.connectDatabase({
-        databaseType,
-        connectionString,
-        name,
-      });
-      set((s) => ({
-        connections: [info, ...s.connections.filter((c) => c.id !== info.id)],
-        selectedConnectionId: info.id,
-        isLoading: false,
-      }));
-      await get().refreshTables(info.id);
-      useToastStore.getState().addToast({
-        type: "success",
-        message: `Connected to ${info.name}`,
-        title: "Database Connected",
-        duration: 4000,
-      });
-    } catch (e) {
-      const errorMessage = errorToMessage(e);
-      set({ error: errorMessage, isLoading: false });
-      useToastStore.getState().addToast({
-        type: "error",
-        message: errorMessage,
-        title: "Connection Failed",
-      });
-    }
-  },
-
-  connectSqliteDatabase: async (path, name) => {
-    await get().connectDatabase("sqlite", path, name);
-  },
-
-  disconnectDatabase: async (id) => {
-    try {
-      await databaseService.disconnectDatabase(id);
-      set((s) => {
-        const nextSelected = s.selectedConnectionId === id ? null : s.selectedConnectionId;
-        const { [id]: _removed, ...restTables } = s.tablesByConnection;
-        return {
-          connections: s.connections.filter((c) => c.id !== id),
-          selectedConnectionId: nextSelected,
-          tablesByConnection: restTables,
-        };
-      });
-      useToastStore.getState().addToast({
-        type: "success",
-        message: "Database disconnected",
-        duration: 3000,
-      });
-    } catch (e) {
-      const errorMessage = errorToMessage(e);
-      set({ error: errorMessage });
-      useToastStore.getState().addToast({
-        type: "error",
-        message: errorMessage,
-        title: "Disconnect Failed",
-      });
-    }
-  },
-
-  selectConnection: async (id) => {
-    set({ selectedConnectionId: id });
-    if (id) {
-      await get().refreshTables(id);
-    }
-  },
-
-  refreshTables: async (id) => {
-    const targetId = id ?? get().selectedConnectionId;
+  const refreshTables = async (id?: string) => {
+    const targetId = id ?? selectedConnectionId;
     if (!targetId) return;
-    set({ isLoadingTables: true, error: null });
+    setIsLoadingTables(true);
+    setError(null);
     try {
       const tables = await databaseService.listDatabaseTables(targetId);
-      set((s) => ({
-        tablesByConnection: {
-          ...s.tablesByConnection,
-          [targetId]: tables,
-        },
-        isLoadingTables: false,
+      setTablesByConnection((current) => ({
+        ...current,
+        [targetId]: tables,
       }));
+      setIsLoadingTables(false);
     } catch (e) {
       const errorMessage = errorToMessage(e);
-      set({ error: errorMessage, isLoadingTables: false });
-      useToastStore.getState().addToast({
-        type: "error",
-        message: errorMessage,
-        title: "Failed to load tables",
-      });
+      setError(errorMessage);
+      setIsLoadingTables(false);
+      toast.error(errorMessage, "Failed to load tables");
     }
-  },
+  };
 
-  clearError: () => set({ error: null }),
-}));
+  const connectDatabaseInternal = async (
+    databaseType: DatabaseType,
+    connectionString: string,
+    name?: string,
+  ) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const info = await databaseService.connectDatabase({ databaseType, connectionString, name });
+      setConnections((current) => [info, ...current.filter((connection) => connection.id !== info.id)]);
+      setSelectedConnectionId(info.id);
+      setIsLoading(false);
+      await refreshTables(info.id);
+      toast.success(`Connected to ${info.name}`, "Database Connected", 4000);
+    } catch (e) {
+      const errorMessage = errorToMessage(e);
+      setError(errorMessage);
+      setIsLoading(false);
+      toast.error(errorMessage, "Connection Failed");
+      throw e;
+    }
+  };
+
+  const value = useMemo<DatabaseState>(
+    () => ({
+      connections,
+      selectedConnectionId,
+      tablesByConnection,
+      isLoading,
+      isLoadingTables,
+      error,
+      loadConnections: async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+          const nextConnections = await databaseService.listDatabaseConnections();
+          setConnections(nextConnections);
+          setSelectedConnectionId((current) =>
+            current && nextConnections.some((connection) => connection.id === current) ? current : null,
+          );
+          setIsLoading(false);
+        } catch (e) {
+          const errorMessage = errorToMessage(e);
+          setError(errorMessage);
+          setIsLoading(false);
+          toast.error(errorMessage, "Failed to load database connections");
+        }
+      },
+      connectDatabase: async (databaseType, connectionString, name) => {
+        await connectDatabaseInternal(databaseType, connectionString, name);
+      },
+      connectSqliteDatabase: async (path, name) => {
+        await connectDatabaseInternal("sqlite", path, name);
+      },
+      disconnectDatabase: async (id) => {
+        try {
+          await databaseService.disconnectDatabase(id);
+          setConnections((current) => current.filter((connection) => connection.id !== id));
+          setSelectedConnectionId((current) => (current === id ? null : current));
+          setTablesByConnection((current) => {
+            const { [id]: _removed, ...rest } = current;
+            return rest;
+          });
+          toast.success("Database disconnected", undefined, 3000);
+        } catch (e) {
+          const errorMessage = errorToMessage(e);
+          setError(errorMessage);
+          toast.error(errorMessage, "Disconnect Failed");
+        }
+      },
+      selectConnection: async (id) => {
+        setSelectedConnectionId(id);
+        if (id) {
+          await refreshTables(id);
+        }
+      },
+      refreshTables,
+      clearError: () => setError(null),
+    }),
+    [connections, selectedConnectionId, tablesByConnection, isLoading, isLoadingTables, error, toast],
+  );
+
+  return React.createElement(DatabaseContext.Provider, { value }, children);
+}
+
+export function useDatabaseStore() {
+  const context = useContext(DatabaseContext);
+  if (!context) {
+    throw new Error("useDatabaseStore must be used within DatabaseProvider");
+  }
+  return context;
+}

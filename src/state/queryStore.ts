@@ -1,11 +1,11 @@
-import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import React, { createContext, useContext, useMemo, useState } from "react";
 import { HistoryEntry, QueryResult, SavedQuery, StreamChunk } from "../models/query";
 import * as queryService from "../services/queryService";
 import { listen } from "@tauri-apps/api/event";
 import { useDatabaseStore } from "./databaseStore";
-import { useToastStore } from "../utils/toast";
+import { useToast } from "../utils/toast";
 import { errorToMessage } from "../utils/errors";
+import { usePersistentState } from "../hooks/usePersistentState";
 
 interface StreamingState {
   queryId: string | null;
@@ -39,198 +39,198 @@ interface QueryState {
   clearError: () => void;
 }
 
-export const useQueryStore = create<QueryState>()(persist((set, get) => ({
-  sql: `-- Welcome to ArrowLens SQL Workspace
+const DEFAULT_SQL = `-- Welcome to ArrowLens SQL Workspace
 -- Load a dataset first, then query it by its name.
 -- Example:
 -- SELECT * FROM my_table LIMIT 100;
-`,
-  isRunning: false,
-  result: null,
-  error: null,
-  history: [],
-  savedQueries: [],
-  streaming: { queryId: null, columns: [], rows: [], isDone: false },
-  isStreaming: false,
-  explainPlan: null,
-  isExplaining: false,
+`;
 
-  setSql: (sql: string) => set({ sql }),
+const QueryContext = createContext<QueryState | null>(null);
 
-  runQuery: async (connectionIdOverride = undefined, sqlOverride = undefined) => {
-    const { sql } = get();
-    const effectiveSql = (sqlOverride ?? sql).trim();
-    if (!effectiveSql) {
-      useToastStore.getState().addToast({
-        type: "warning",
-        message: "Please enter a SQL query",
-        title: "Empty Query",
-      });
-      return;
-    }
-    set({ isRunning: true, result: null, error: null, isStreaming: false });
+export function QueryProvider({ children }: { children: React.ReactNode }) {
+  const [sql, setSql] = usePersistentState<string>("arrowlens-query-sql", DEFAULT_SQL);
+  const [savedQueries, setSavedQueries] = usePersistentState<SavedQuery[]>("arrowlens-saved-queries", []);
+  const [isRunning, setIsRunning] = useState(false);
+  const [result, setResult] = useState<QueryResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [streaming, setStreaming] = useState<StreamingState>({ queryId: null, columns: [], rows: [], isDone: false });
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [explainPlan, setExplainPlan] = useState<string | null>(null);
+  const [isExplaining, setIsExplaining] = useState(false);
+
+  const { selectedConnectionId } = useDatabaseStore();
+  const toast = useToast();
+
+  const loadHistory = async () => {
     try {
-      const selectedConnectionId = connectionIdOverride ?? useDatabaseStore.getState().selectedConnectionId;
-      console.info("[Query Execute]", {
-        backend: selectedConnectionId ? "database" : "datafusion",
-        connectionId: selectedConnectionId ?? null,
-        sql: effectiveSql,
-      });
-      const result = await queryService.runQuery(effectiveSql, selectedConnectionId);
-      set({ result, isRunning: false });
-      get().loadHistory();
-    } catch (e) {
-      const errorMessage = errorToMessage(e);
-      set({ error: errorMessage, isRunning: false });
-      useToastStore.getState().addToast({
-        type: "error",
-        message: errorMessage,
-        title: "Query Error",
-        duration: 7000,
-      });
-    }
-  },
-
-  runStreamingQuery: async (connectionIdOverride = undefined, sqlOverride = undefined) => {
-    const { sql } = get();
-    const effectiveSql = (sqlOverride ?? sql).trim();
-    if (!effectiveSql) {
-      useToastStore.getState().addToast({
-        type: "warning",
-        message: "Please enter a SQL query",
-        title: "Empty Query",
-      });
-      return;
-    }
-
-    const selectedConnectionId = connectionIdOverride ?? useDatabaseStore.getState().selectedConnectionId;
-    console.info("[Streaming Query Execute]", {
-      backend: selectedConnectionId ? "database" : "datafusion",
-      connectionId: selectedConnectionId ?? null,
-      sql: effectiveSql,
-    });
-
-    set({
-      isRunning: true,
-      result: null,
-      error: null,
-      isStreaming: true,
-      streaming: { queryId: null, columns: [], rows: [], isDone: false },
-    });
-
-    try {
-      const queryId = await queryService.runStreamingQuery(effectiveSql, 500, selectedConnectionId);
-
-      set((s) => ({ streaming: { ...s.streaming, queryId } }));
-
-      // Use a shared cleanup to prevent listener leaks on both success and error.
-      let unlistenChunk: (() => void) | null = null;
-      let unlistenError: (() => void) | null = null;
-      const cleanup = () => {
-        if (unlistenChunk) { unlistenChunk(); unlistenChunk = null; }
-        if (unlistenError) { unlistenError(); unlistenError = null; }
-      };
-
-      unlistenChunk = await listen<StreamChunk>(
-        `query-chunk-${queryId}`,
-        (event) => {
-          const chunk = event.payload;
-          if (chunk.done) {
-            set({ isRunning: false });
-            set((s) => ({ streaming: { ...s.streaming, isDone: true } }));
-            cleanup();
-          } else {
-            set((s) => ({
-              streaming: {
-                ...s.streaming,
-                columns: chunk.columns,
-                rows: [...s.streaming.rows, ...chunk.rows],
-              },
-            }));
-          }
-        }
-      );
-
-      unlistenError = await listen<{ message: string }>(
-        `query-error-${queryId}`,
-        (event) => {
-          const msg = event.payload?.message ?? errorToMessage(event.payload);
-          set({ error: msg, isRunning: false });
-          useToastStore.getState().addToast({
-            type: "error",
-            message: msg,
-            title: "Streaming Query Error",
-            duration: 7000,
-          });
-          cleanup();
-        }
-      );
-    } catch (e) {
-      const errorMessage = errorToMessage(e);
-      set({ error: errorMessage, isRunning: false });
-      useToastStore.getState().addToast({
-        type: "error",
-        message: errorMessage,
-        title: "Query Error",
-        duration: 7000,
-      });
-    }
-  },
-
-  cancelQuery: () => {
-    set({ isRunning: false });
-  },
-
-  loadHistory: async () => {
-    try {
-      const history = await queryService.getQueryHistory();
-      set({ history });
+      const nextHistory = await queryService.getQueryHistory();
+      setHistory(nextHistory);
     } catch {
-      // ignore
+      // Ignore history refresh failures.
     }
-  },
+  };
 
-  saveQuery: (name: string, tags: string[] = []) => {
-    const { sql } = get();
-    const entry: SavedQuery = {
-      id: crypto.randomUUID(),
-      name,
+  const value = useMemo<QueryState>(
+    () => ({
       sql,
-      created_at: new Date().toISOString(),
-      tags,
-    };
-    set((s) => ({ savedQueries: [entry, ...s.savedQueries] }));
-  },
+      isRunning,
+      result,
+      error,
+      history,
+      savedQueries,
+      streaming,
+      isStreaming,
+      explainPlan,
+      isExplaining,
+      setSql,
+      runQuery: async (connectionIdOverride = undefined, sqlOverride = undefined) => {
+        const effectiveSql = (sqlOverride ?? sql).trim();
+        if (!effectiveSql) {
+          toast.warning("Please enter a SQL query", "Empty Query");
+          return;
+        }
 
-  removeSavedQuery: (id: string) => {
-    set((s) => ({ savedQueries: s.savedQueries.filter((q) => q.id !== id) }));
-  },
+        const effectiveConnectionId = connectionIdOverride ?? selectedConnectionId;
+        setIsRunning(true);
+        setResult(null);
+        setError(null);
+        setIsStreaming(false);
 
-  loadFromHistory: (entry: HistoryEntry) => {
-    set({ sql: entry.sql });
-  },
+        try {
+          console.info("[Query Execute]", {
+            backend: effectiveConnectionId ? "database" : "datafusion",
+            connectionId: effectiveConnectionId ?? null,
+            sql: effectiveSql,
+          });
 
-  runExplain: async (verbose = false, sqlOverride = undefined) => {
-    const { sql } = get();
-    const effectiveSql = (sqlOverride ?? sql).trim();
-    if (!effectiveSql) return;
-    set({ isExplaining: true, explainPlan: null });
-    try {
-      const plan = await queryService.explainQuery(effectiveSql, verbose);
-      set({ explainPlan: plan, isExplaining: false });
-    } catch (e) {
-      const msg = errorToMessage(e);
-      set({ isExplaining: false });
-      useToastStore.getState().addToast({ type: "error", title: "EXPLAIN failed", message: msg });
-    }
-  },
+          const nextResult = await queryService.runQuery(effectiveSql, effectiveConnectionId);
+          setResult(nextResult);
+          setIsRunning(false);
+          await loadHistory();
+        } catch (e) {
+          const errorMessage = errorToMessage(e);
+          setError(errorMessage);
+          setIsRunning(false);
+          toast.error(errorMessage, "Query Error", undefined, 7000);
+        }
+      },
+      runStreamingQuery: async (connectionIdOverride = undefined, sqlOverride = undefined) => {
+        const effectiveSql = (sqlOverride ?? sql).trim();
+        if (!effectiveSql) {
+          toast.warning("Please enter a SQL query", "Empty Query");
+          return;
+        }
 
-  clearResult: () => set({ result: null, streaming: { queryId: null, columns: [], rows: [], isDone: false } }),
-  clearError: () => set({ error: null }),
-}), {
-  name: "arrowlens-query-store",
-  partialize: (state) => ({
-    savedQueries: state.savedQueries,
-    sql: state.sql,
-  }),
-}));
+        const effectiveConnectionId = connectionIdOverride ?? selectedConnectionId;
+        console.info("[Streaming Query Execute]", {
+          backend: effectiveConnectionId ? "database" : "datafusion",
+          connectionId: effectiveConnectionId ?? null,
+          sql: effectiveSql,
+        });
+
+        setIsRunning(true);
+        setResult(null);
+        setError(null);
+        setIsStreaming(true);
+        setStreaming({ queryId: null, columns: [], rows: [], isDone: false });
+
+        try {
+          const queryId = await queryService.runStreamingQuery(effectiveSql, 500, effectiveConnectionId);
+          setStreaming((current) => ({ ...current, queryId }));
+
+          let unlistenChunk: (() => void) | null = null;
+          let unlistenError: (() => void) | null = null;
+          const cleanup = () => {
+            if (unlistenChunk) {
+              unlistenChunk();
+              unlistenChunk = null;
+            }
+            if (unlistenError) {
+              unlistenError();
+              unlistenError = null;
+            }
+          };
+
+          unlistenChunk = await listen<StreamChunk>(`query-chunk-${queryId}`, (event) => {
+            const chunk = event.payload;
+            if (chunk.done) {
+              setIsRunning(false);
+              setStreaming((current) => ({ ...current, isDone: true }));
+              cleanup();
+              return;
+            }
+
+            setStreaming((current) => ({
+              ...current,
+              columns: chunk.columns,
+              rows: [...current.rows, ...chunk.rows],
+            }));
+          });
+
+          unlistenError = await listen<{ message: string }>(`query-error-${queryId}`, (event) => {
+            const message = event.payload?.message ?? errorToMessage(event.payload);
+            setError(message);
+            setIsRunning(false);
+            toast.error(message, "Streaming Query Error", undefined, 7000);
+            cleanup();
+          });
+        } catch (e) {
+          const errorMessage = errorToMessage(e);
+          setError(errorMessage);
+          setIsRunning(false);
+          toast.error(errorMessage, "Query Error", undefined, 7000);
+        }
+      },
+      cancelQuery: () => setIsRunning(false),
+      loadHistory,
+      saveQuery: (name: string, tags: string[] = []) => {
+        const entry: SavedQuery = {
+          id: crypto.randomUUID(),
+          name,
+          sql,
+          created_at: new Date().toISOString(),
+          tags,
+        };
+        setSavedQueries((current) => [entry, ...current]);
+      },
+      removeSavedQuery: (id: string) => {
+        setSavedQueries((current) => current.filter((query) => query.id !== id));
+      },
+      loadFromHistory: (entry: HistoryEntry) => {
+        setSql(entry.sql);
+      },
+      runExplain: async (verbose = false, sqlOverride = undefined) => {
+        const effectiveSql = (sqlOverride ?? sql).trim();
+        if (!effectiveSql) return;
+        setIsExplaining(true);
+        setExplainPlan(null);
+        try {
+          const plan = await queryService.explainQuery(effectiveSql, verbose);
+          setExplainPlan(plan);
+          setIsExplaining(false);
+        } catch (e) {
+          const message = errorToMessage(e);
+          setIsExplaining(false);
+          toast.error(message, "EXPLAIN failed");
+        }
+      },
+      clearResult: () => {
+        setResult(null);
+        setStreaming({ queryId: null, columns: [], rows: [], isDone: false });
+      },
+      clearError: () => setError(null),
+    }),
+    [sql, isRunning, result, error, history, savedQueries, streaming, isStreaming, explainPlan, isExplaining, selectedConnectionId, toast, setSql, setSavedQueries],
+  );
+
+  return React.createElement(QueryContext.Provider, { value }, children);
+}
+
+export function useQueryStore() {
+  const context = useContext(QueryContext);
+  if (!context) {
+    throw new Error("useQueryStore must be used within QueryProvider");
+  }
+  return context;
+}

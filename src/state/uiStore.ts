@@ -1,4 +1,4 @@
-import { create } from "zustand";
+import React, { createContext, useContext, useMemo, useState } from "react";
 
 export type ActiveTab = "explorer" | "query" | "chart" | "history";
 export type ResultTab = "table" | "chart" | "explain";
@@ -23,22 +23,44 @@ interface UiState {
   toggleFullQuery: () => void;
 }
 
-export const useUiStore = create<UiState>((set) => ({
-  activeTab: "query",
-  resultTab: "table",
-  sidebarSection: "datasets",
-  isSidebarOpen: true,
-  isCommandPaletteOpen: false,
-  isFullQuery: false,
-  theme: "dark",
+const UiContext = createContext<UiState | null>(null);
 
-  setActiveTab: (activeTab) => set({ activeTab }),
-  setResultTab: (resultTab) => set({ resultTab }),
-  setSidebarSection: (sidebarSection) => set({ sidebarSection }),
-  toggleSidebar: () => set((s) => ({ isSidebarOpen: !s.isSidebarOpen })),
-  openCommandPalette: () => set({ isCommandPaletteOpen: true }),
-  closeCommandPalette: () => set({ isCommandPaletteOpen: false }),
-  toggleCommandPalette: () =>
-    set((s) => ({ isCommandPaletteOpen: !s.isCommandPaletteOpen })),
-  toggleFullQuery: () => set((s) => ({ isFullQuery: !s.isFullQuery })),
-}));
+export function UiProvider({ children }: { children: React.ReactNode }) {
+  const [activeTab, setActiveTab] = useState<ActiveTab>("query");
+  const [resultTab, setResultTab] = useState<ResultTab>("table");
+  const [sidebarSection, setSidebarSection] = useState<SidebarSection>("datasets");
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isFullQuery, setIsFullQuery] = useState(false);
+
+  const value = useMemo(
+    () => ({
+      activeTab,
+      resultTab,
+      sidebarSection,
+      isSidebarOpen,
+      isCommandPaletteOpen,
+      isFullQuery,
+      theme: "dark" as const,
+      setActiveTab,
+      setResultTab,
+      setSidebarSection,
+      toggleSidebar: () => setIsSidebarOpen((current) => !current),
+      openCommandPalette: () => setIsCommandPaletteOpen(true),
+      closeCommandPalette: () => setIsCommandPaletteOpen(false),
+      toggleCommandPalette: () => setIsCommandPaletteOpen((current) => !current),
+      toggleFullQuery: () => setIsFullQuery((current) => !current),
+    }),
+    [activeTab, resultTab, sidebarSection, isSidebarOpen, isCommandPaletteOpen, isFullQuery],
+  );
+
+  return React.createElement(UiContext.Provider, { value }, children);
+}
+
+export function useUiStore() {
+  const context = useContext(UiContext);
+  if (!context) {
+    throw new Error("useUiStore must be used within UiProvider");
+  }
+  return context;
+}

@@ -1,7 +1,7 @@
-import { create } from 'zustand';
-import { AlertCircle, CheckCircle, Info, AlertTriangle } from 'lucide-react';
+import React, { createContext, useContext, useMemo, useState } from "react";
+import { AlertCircle, CheckCircle, Info, AlertTriangle } from "lucide-react";
 
-export type ToastType = 'success' | 'error' | 'info' | 'warning';
+export type ToastType = "success" | "error" | "info" | "warning";
 
 export interface Toast {
   id: string;
@@ -14,52 +14,67 @@ export interface Toast {
 
 interface ToastStore {
   toasts: Toast[];
-  addToast: (toast: Omit<Toast, 'id'>) => void;
+  addToast: (toast: Omit<Toast, "id">) => void;
   removeToast: (id: string) => void;
   clearAll: () => void;
 }
 
-export const useToastStore = create<ToastStore>((set) => ({
-  toasts: [],
-  addToast: (toast) => {
-    const id = Math.random().toString(36);
-    set((state) => ({
-      toasts: [...state.toasts, { ...toast, id }],
-    }));
+const ToastContext = createContext<ToastStore | null>(null);
+
+export function ToastProvider({ children }: { children: React.ReactNode }) {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const removeToast = (id: string) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+  };
+
+  const addToast = (toast: Omit<Toast, "id">) => {
+    const id = crypto.randomUUID();
+    setToasts((current) => [...current, { ...toast, id }]);
 
     if (toast.duration !== undefined && toast.duration > 0) {
-      setTimeout(() => {
-        set((state) => ({
-          toasts: state.toasts.filter((t) => t.id !== id),
-        }));
+      window.setTimeout(() => {
+        setToasts((current) => current.filter((item) => item.id !== id));
       }, toast.duration);
     }
-  },
-  removeToast: (id) => {
-    set((state) => ({
-      toasts: state.toasts.filter((t) => t.id !== id),
-    }));
-  },
-  clearAll: () => {
-    set({ toasts: [] });
-  },
-}));
+  };
+
+  const value = useMemo(
+    () => ({
+      toasts,
+      addToast,
+      removeToast,
+      clearAll: () => setToasts([]),
+    }),
+    [toasts],
+  );
+
+  return <ToastContext.Provider value={value}>{children}</ToastContext.Provider>;
+}
+
+export function useToastStore() {
+  const context = useContext(ToastContext);
+  if (!context) {
+    throw new Error("useToastStore must be used within ToastProvider");
+  }
+  return context;
+}
 
 export function useToast() {
   const { addToast } = useToastStore();
 
   return {
     success: (message: string, title?: string, duration = 5000) => {
-      addToast({ type: 'success', message, title, duration });
+      addToast({ type: "success", message, title, duration });
     },
     error: (message: string, title?: string, suggestion?: string, duration = 7000) => {
-      addToast({ type: 'error', message, title, suggestion, duration });
+      addToast({ type: "error", message, title, suggestion, duration });
     },
     warning: (message: string, title?: string, duration = 6000) => {
-      addToast({ type: 'warning', message, title, duration });
+      addToast({ type: "warning", message, title, duration });
     },
     info: (message: string, title?: string, duration = 5000) => {
-      addToast({ type: 'info', message, title, duration });
+      addToast({ type: "info", message, title, duration });
     },
   };
 }
@@ -69,27 +84,27 @@ export function ToastContainer() {
 
   const getIcon = (type: ToastType) => {
     switch (type) {
-      case 'success':
+      case "success":
         return <CheckCircle className="h-5 w-5 text-green-500" />;
-      case 'error':
+      case "error":
         return <AlertCircle className="h-5 w-5 text-red-500" />;
-      case 'warning':
+      case "warning":
         return <AlertTriangle className="h-5 w-5 text-yellow-500" />;
-      case 'info':
+      case "info":
         return <Info className="h-5 w-5 text-blue-500" />;
     }
   };
 
   const getBgColor = (type: ToastType) => {
     switch (type) {
-      case 'success':
-        return 'bg-green-900/20 border-green-500/30';
-      case 'error':
-        return 'bg-red-900/20 border-red-500/30';
-      case 'warning':
-        return 'bg-yellow-900/20 border-yellow-500/30';
-      case 'info':
-        return 'bg-blue-900/20 border-blue-500/30';
+      case "success":
+        return "bg-green-900/20 border-green-500/30";
+      case "error":
+        return "bg-red-900/20 border-red-500/30";
+      case "warning":
+        return "bg-yellow-900/20 border-yellow-500/30";
+      case "info":
+        return "bg-blue-900/20 border-blue-500/30";
     }
   };
 
