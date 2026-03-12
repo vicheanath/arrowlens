@@ -5,6 +5,7 @@ use sqlx::{any::AnyPoolOptions, AnyPool, Column, Row, TypeInfo};
 use tauri::State;
 
 use crate::engine::database_registry::{DatabaseConnectionInfo, DatabaseRegistry, DatabaseType};
+use crate::error::{AppError, Result};
 use crate::streaming::result_serializer::QueryResult;
 
 #[tauri::command]
@@ -13,7 +14,7 @@ pub async fn connect_database(
     connection_string: String,
     name: Option<String>,
     registry: State<'_, Arc<DatabaseRegistry>>,
-) -> Result<DatabaseConnectionInfo, String> {
+) -> Result<DatabaseConnectionInfo> {
     let normalized = normalize_connection_string(&database_type, &connection_string);
     validate_connection(&normalized).await?;
 
@@ -28,14 +29,14 @@ pub async fn connect_sqlite_database(
     path: String,
     name: Option<String>,
     registry: State<'_, Arc<DatabaseRegistry>>,
-) -> Result<DatabaseConnectionInfo, String> {
+) -> Result<DatabaseConnectionInfo> {
     connect_database(DatabaseType::Sqlite, path, name, registry).await
 }
 
 #[tauri::command]
 pub async fn list_database_connections(
     registry: State<'_, Arc<DatabaseRegistry>>,
-) -> Result<Vec<DatabaseConnectionInfo>, String> {
+) -> Result<Vec<DatabaseConnectionInfo>> {
     Ok(registry.list())
 }
 
@@ -43,7 +44,7 @@ pub async fn list_database_connections(
 pub async fn disconnect_database(
     id: String,
     registry: State<'_, Arc<DatabaseRegistry>>,
-) -> Result<bool, String> {
+) -> Result<bool> {
     Ok(registry.remove(&id))
 }
 
@@ -51,10 +52,10 @@ pub async fn disconnect_database(
 pub async fn list_database_tables(
     connection_id: String,
     registry: State<'_, Arc<DatabaseRegistry>>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>> {
     let info = registry
         .get(&connection_id)
-        .ok_or_else(|| format!("Database connection not found: {}", connection_id))?;
+        .ok_or_else(|| AppError::DatabaseNotFound)?;
 
     let pool = open_pool(&info.connection_string).await?;
 
@@ -73,11 +74,12 @@ pub async fn list_database_tables(
     let rows = sqlx::query(sql)
         .fetch_all(&pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
 
     let mut tables = Vec::with_capacity(rows.len());
     for row in rows {
-        let name = row.try_get::<String, _>(0).map_err(|e| e.to_string())?;
+        let name = row.try_get::<String, _>(0)
+            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
         tables.push(name);
     }
 
@@ -91,10 +93,14 @@ pub async fn run_database_query(
     sql: String,
     limit: Option<usize>,
     registry: State<'_, Arc<DatabaseRegistry>>,
-) -> Result<QueryResult, String> {
+) -> Result<QueryResult> {
+    if sql.trim().is_empty() {
+        return Err(AppError::QuerySyntaxError("Query cannot be empty".to_string()));
+    }
+
     let info = registry
         .get(&connection_id)
-        .ok_or_else(|| format!("Database connection not found: {}", connection_id))?;
+        .ok_or_else(|| AppError::DatabaseNotFound)?;
 
     let pool = open_pool(&info.connection_string).await?;
     let started = Instant::now();
@@ -102,7 +108,7 @@ pub async fn run_database_query(
     let rows = sqlx::query(&sql)
         .fetch_all(&pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
 
     let max_rows = limit.unwrap_or(10_000);
     let clipped = rows.into_iter().take(max_rows).collect::<Vec<_>>();
@@ -172,22 +178,22 @@ fn default_connection_name(database_type: &DatabaseType, connection_string: &str
     }
 }
 
-async fn validate_connection(connection_string: &str) -> Result<(), String> {
+async fn validate_connection(connection_string: &str) -> Result<()> {
     let pool = AnyPoolOptions::new()
         .max_connections(1)
         .connect(connection_string)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppError::DatabaseConnectionError(e.to_string()))?;
     pool.close().await;
     Ok(())
 }
 
-async fn open_pool(connection_string: &str) -> Result<AnyPool, String> {
+async fn open_pool(connection_string: &str) -> Result<AnyPool> {
     AnyPoolOptions::new()
         .max_connections(1)
         .connect(connection_string)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::DatabaseConnectionError(e.to_string()))
 }
 
 fn any_cell_to_json(row: &sqlx::any::AnyRow, idx: usize) -> serde_json::Value {

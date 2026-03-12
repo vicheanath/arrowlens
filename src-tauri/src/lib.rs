@@ -5,6 +5,7 @@ pub mod cache;
 pub mod engine;
 pub mod error;
 pub mod loaders;
+pub mod state;
 pub mod streaming;
 
 use api::{database_api, dataset_api, query_api, stats_api};

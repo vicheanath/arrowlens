@@ -5,6 +5,8 @@ use uuid::Uuid;
 
 use crate::engine::dataset_registry::DatasetRegistry;
 use crate::engine::query_engine::QueryEngine;
+use crate::error::{AppError, Result};
+use crate::state::active_queries;
 use crate::streaming::record_batch_stream::stream_to_frontend;
 use crate::streaming::result_serializer::QueryResult;
 
@@ -27,9 +29,13 @@ pub struct HistoryEntry {
 pub async fn run_query(
     sql: String,
     registry: State<'_, Arc<DatasetRegistry>>,
-) -> Result<QueryResult, String> {
+) -> Result<QueryResult> {
+    if sql.trim().is_empty() {
+        return Err(AppError::QuerySyntaxError("Query cannot be empty".to_string()));
+    }
+
     let engine = QueryEngine::new(registry.inner().clone());
-    let result = engine.execute_query(&sql).await.map_err(|e| e.to_string())?;
+    let result = engine.execute_query(&sql).await?;
 
     record_history(&sql, Some(result.elapsed_ms), Some(result.row_count), None);
 
@@ -44,7 +50,11 @@ pub async fn run_query_streaming(
     chunk_size: Option<usize>,
     app: AppHandle,
     registry: State<'_, Arc<DatasetRegistry>>,
-) -> Result<String, String> {
+) -> Result<String> {
+    if sql.trim().is_empty() {
+        return Err(AppError::QuerySyntaxError("Query cannot be empty".to_string()));
+    }
+
     let query_id = Uuid::new_v4().to_string();
     let chunk_size = chunk_size.unwrap_or(500);
     let registry_clone = registry.inner().clone();
@@ -52,8 +62,23 @@ pub async fn run_query_streaming(
     let qid = query_id.clone();
     let sql_clone = sql.clone();
 
+    // Register the query
+    active_queries::register_query(&qid);
+    let qid_cleanup = qid.clone();
+
     tokio::spawn(async move {
         let engine = QueryEngine::new(registry_clone);
+
+        // Check if cancelled before starting
+        if active_queries::is_cancelled(&qid) {
+            let _ = tauri::Emitter::emit(
+                &app_clone,
+                &format!("query-error-{}", qid),
+                AppError::QueryCancelled.to_response(Some(sql_clone.clone())),
+            );
+            active_queries::cleanup(&qid_cleanup);
+            return;
+        }
 
         match engine.execute_streaming(&sql_clone).await {
             Ok(df) => {
@@ -63,15 +88,18 @@ pub async fn run_query_streaming(
                             let _ = tauri::Emitter::emit(
                                 &app_clone,
                                 &format!("query-error-{}", qid),
-                                e.to_string(),
+                                e.to_response(Some(sql_clone.clone())),
                             );
+                        } else {
+                            active_queries::complete(&qid);
                         }
                     }
                     Err(e) => {
+                        let app_err = AppError::QueryError(e.to_string());
                         let _ = tauri::Emitter::emit(
                             &app_clone,
                             &format!("query-error-{}", qid),
-                            e.to_string(),
+                            app_err.to_response(Some(sql_clone.clone())),
                         );
                     }
                 }
@@ -80,25 +108,30 @@ pub async fn run_query_streaming(
                 let _ = tauri::Emitter::emit(
                     &app_clone,
                     &format!("query-error-{}", qid),
-                    e.to_string(),
+                    e.to_response(Some(sql_clone.clone())),
                 );
             }
         }
+
+        // Clean up query state
+        active_queries::cleanup(&qid_cleanup);
     });
 
     record_history(&sql, None, None, None);
     Ok(query_id)
 }
 
-/// Cancel a streaming query (no-op stub — actual cancellation is handled by closing the listener).
+/// Cancel a streaming query.
+/// Sets a flag that the streaming endpoint checks to stop sending results.
 #[tauri::command]
-pub async fn cancel_query(_query_id: String) -> Result<(), String> {
+pub async fn cancel_query(query_id: String) -> Result<()> {
+    active_queries::cancel(&query_id);
     Ok(())
 }
 
 /// Return the in-memory query history (most recent first).
 #[tauri::command]
-pub async fn get_query_history() -> Result<Vec<HistoryEntry>, String> {
+pub async fn get_query_history() -> Result<Vec<HistoryEntry>> {
     let lock = HISTORY.lock();
     let mut entries = lock.clone();
     entries.reverse();

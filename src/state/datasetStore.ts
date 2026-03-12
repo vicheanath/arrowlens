@@ -3,6 +3,7 @@ import { DatasetInfo, DatasetSchema, LoaderPreview } from "../models/dataset";
 import { DatasetStats } from "../models/statistics";
 import * as datasetService from "../services/datasetService";
 import * as statsService from "../services/statsService";
+import { useToastStore } from "../utils/toast";
 
 interface DatasetState {
   datasets: DatasetInfo[];
@@ -40,7 +41,13 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
       const datasets = await datasetService.listDatasets();
       set({ datasets, isLoading: false });
     } catch (e) {
-      set({ error: String(e), isLoading: false });
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      set({ error: errorMessage, isLoading: false });
+      useToastStore.getState().addToast({
+        type: "error",
+        message: errorMessage,
+        title: "Failed to load datasets",
+      });
     }
   },
 
@@ -53,20 +60,47 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
         selectedId: info.id,
         isLoading: false,
       }));
+      useToastStore.getState().addToast({
+        type: "success",
+        message: `Dataset imported: ${info.name} (${info.row_count?.toLocaleString()} rows)`,
+        title: "Import Successful",
+        duration: 4000,
+      });
     } catch (e) {
-      set({ error: String(e), isLoading: false });
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      set({ error: errorMessage, isLoading: false });
+      useToastStore.getState().addToast({
+        type: "error",
+        message: errorMessage,
+        title: "Import Failed",
+      });
     }
   },
 
   removeDataset: async (id: string) => {
-    await datasetService.removeDataset(id);
-    set((s) => ({
-      datasets: s.datasets.filter((d) => d.id !== id),
-      selectedId: s.selectedId === id ? null : s.selectedId,
-      preview: s.selectedId === id ? null : s.preview,
-      schema: s.selectedId === id ? null : s.schema,
-      stats: s.selectedId === id ? null : s.stats,
-    }));
+    try {
+      await datasetService.removeDataset(id);
+      set((s) => ({
+        datasets: s.datasets.filter((d) => d.id !== id),
+        selectedId: s.selectedId === id ? null : s.selectedId,
+        preview: s.selectedId === id ? null : s.preview,
+        schema: s.selectedId === id ? null : s.schema,
+        stats: s.selectedId === id ? null : s.stats,
+      }));
+      useToastStore.getState().addToast({
+        type: "success",
+        message: "Dataset removed",
+        duration: 3000,
+      });
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      set({ error: errorMessage });
+      useToastStore.getState().addToast({
+        type: "error",
+        message: errorMessage,
+        title: "Remove Failed",
+      });
+    }
   },
 
   selectDataset: (id: string | null) => {
@@ -82,7 +116,17 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
       const preview = await datasetService.getDatasetPreview(id, limit);
       set({ preview });
     } catch (e) {
-      set({ error: String(e) });
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      set({ error: errorMessage });
+      // Only show preview errors as info since they're not critical
+      if (!errorMessage.includes("not yet implemented")) {
+        useToastStore.getState().addToast({
+          type: "warning",
+          message: errorMessage,
+          title: "Preview Load Failed",
+          duration: 5000,
+        });
+      }
     }
   },
 
@@ -91,7 +135,16 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
       const schema = await statsService.getSchema(id);
       set({ schema });
     } catch (e) {
-      set({ error: String(e) });
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      set({ error: errorMessage });
+      if (!errorMessage.includes("not yet implemented")) {
+        useToastStore.getState().addToast({
+          type: "warning",
+          message: errorMessage,
+          title: "Schema Load Failed",
+          duration: 5000,
+        });
+      }
     }
   },
 
@@ -101,7 +154,13 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
       const stats = await statsService.getStatistics(id);
       set({ stats, isLoadingStats: false });
     } catch (e) {
-      set({ error: String(e), isLoadingStats: false });
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      set({ error: errorMessage, isLoadingStats: false });
+      useToastStore.getState().addToast({
+        type: "error",
+        message: errorMessage,
+        title: "Statistics Computation Failed",
+      });
     }
   },
 

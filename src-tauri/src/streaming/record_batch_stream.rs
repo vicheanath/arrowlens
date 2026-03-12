@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use crate::error::Result;
+use crate::state::active_queries;
 use crate::streaming::result_serializer::serialize_batch_to_rows;
 
 /// A single streamed chunk event payload.
@@ -23,6 +24,7 @@ pub struct StreamChunk {
 /// Each chunk is emitted as `query-chunk-{query_id}`.
 /// A final event with `done: true` signals stream completion.
 /// On error, `query-error-{query_id}` is emitted.
+/// If the query is cancelled, streaming stops immediately.
 pub async fn stream_to_frontend(
     app: AppHandle,
     query_id: String,
@@ -37,6 +39,20 @@ pub async fn stream_to_frontend(
     let mut chunk_index = 0usize;
 
     while let Some(batch_result) = stream.next().await {
+        // Check if query was cancelled
+        if active_queries::is_cancelled(&query_id) {
+            // Send cancellation message and stop
+            let _ = app.emit(&format!("query-chunk-{}", query_id), StreamChunk {
+                query_id: query_id.clone(),
+                chunk_index,
+                columns: columns.clone(),
+                rows: vec![],
+                row_count: 0,
+                done: true,
+            });
+            return Ok(());
+        }
+
         let batch = batch_result.map_err(|e| crate::error::AppError::QueryError(e.to_string()))?;
         buffered_rows += batch.num_rows();
         buffer.push(batch);

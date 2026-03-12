@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { DatabaseConnectionInfo, DatabaseType } from "../models/database";
 import * as databaseService from "../services/databaseService";
+import { useToastStore } from "../utils/toast";
 
 interface DatabaseState {
   connections: DatabaseConnectionInfo[];
@@ -42,7 +43,13 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
           : null;
       set({ connections, selectedConnectionId: stillSelected, isLoading: false });
     } catch (e) {
-      set({ error: String(e), isLoading: false });
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      set({ error: errorMessage, isLoading: false });
+      useToastStore.getState().addToast({
+        type: "error",
+        message: errorMessage,
+        title: "Failed to load database connections",
+      });
     }
   },
 
@@ -60,8 +67,20 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
         isLoading: false,
       }));
       await get().refreshTables(info.id);
+      useToastStore.getState().addToast({
+        type: "success",
+        message: `Connected to ${info.name}`,
+        title: "Database Connected",
+        duration: 4000,
+      });
     } catch (e) {
-      set({ error: String(e), isLoading: false });
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      set({ error: errorMessage, isLoading: false });
+      useToastStore.getState().addToast({
+        type: "error",
+        message: errorMessage,
+        title: "Connection Failed",
+      });
     }
   },
 
@@ -81,8 +100,19 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
           tablesByConnection: restTables,
         };
       });
+      useToastStore.getState().addToast({
+        type: "success",
+        message: "Database disconnected",
+        duration: 3000,
+      });
     } catch (e) {
-      set({ error: String(e) });
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      set({ error: errorMessage });
+      useToastStore.getState().addToast({
+        type: "error",
+        message: errorMessage,
+        title: "Disconnect Failed",
+      });
     }
   },
 
@@ -107,7 +137,13 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
         isLoadingTables: false,
       }));
     } catch (e) {
-      set({ error: String(e), isLoadingTables: false });
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      set({ error: errorMessage, isLoadingTables: false });
+      useToastStore.getState().addToast({
+        type: "error",
+        message: errorMessage,
+        title: "Failed to load tables",
+      });
     }
   },
 

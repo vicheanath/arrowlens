@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::engine::dataset_registry::{DatasetInfo, DatasetRegistry, FileType};
+use crate::error::{AppError, Result};
 use crate::loaders::{csv_loader::CsvLoader, json_loader::JsonLoader, parquet_loader::ParquetLoader, DatasetLoader, LoaderPreview};
 
 /// Load a dataset from disk and register it in the registry.
@@ -11,7 +12,12 @@ pub async fn load_dataset(
     path: String,
     name: Option<String>,
     registry: State<'_, Arc<DatasetRegistry>>,
-) -> Result<DatasetInfo, String> {
+) -> Result<DatasetInfo> {
+    // Verify file exists
+    if !std::path::Path::new(&path).exists() {
+        return Err(AppError::InvalidFilePath(format!("File not found: {}", path)));
+    }
+
     let file_type = detect_file_type(&path)?;
 
     let size_bytes = std::fs::metadata(&path)
@@ -61,7 +67,7 @@ pub async fn load_dataset(
 #[tauri::command]
 pub async fn list_datasets(
     registry: State<'_, Arc<DatasetRegistry>>,
-) -> Result<Vec<DatasetInfo>, String> {
+) -> Result<Vec<DatasetInfo>> {
     Ok(registry.list())
 }
 
@@ -70,7 +76,7 @@ pub async fn list_datasets(
 pub async fn remove_dataset(
     id: String,
     registry: State<'_, Arc<DatasetRegistry>>,
-) -> Result<bool, String> {
+) -> Result<bool> {
     Ok(registry.remove(&id))
 }
 
@@ -80,10 +86,10 @@ pub async fn get_dataset_preview(
     id: String,
     limit: Option<usize>,
     registry: State<'_, Arc<DatasetRegistry>>,
-) -> Result<LoaderPreview, String> {
+) -> Result<LoaderPreview> {
     let info = registry
         .get(&id)
-        .ok_or_else(|| format!("Dataset not found: {}", id))?;
+        .ok_or_else(|| AppError::DatasetNotFound(id))?;
 
     let limit = limit.unwrap_or(100);
 
@@ -91,15 +97,15 @@ pub async fn get_dataset_preview(
         FileType::Csv => CsvLoader.load_preview(&info.source_path, limit).await,
         FileType::Parquet => ParquetLoader.load_preview(&info.source_path, limit).await,
         FileType::Json => JsonLoader.load_preview(&info.source_path, limit).await,
-        FileType::Arrow => Err(crate::error::AppError::UnsupportedFormat(
+        FileType::Arrow => Err(AppError::UnsupportedFormat(
             "Arrow IPC preview not yet implemented".into(),
         )),
     };
 
-    preview.map_err(|e| e.to_string())
+    preview
 }
 
-fn detect_file_type(path: &str) -> Result<FileType, String> {
+fn detect_file_type(path: &str) -> Result<FileType> {
     let ext = std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
@@ -107,5 +113,5 @@ fn detect_file_type(path: &str) -> Result<FileType, String> {
         .to_lowercase();
 
     FileType::from_extension(&ext)
-        .ok_or_else(|| format!("Unsupported file extension: .{}", ext))
+        .ok_or_else(|| AppError::UnsupportedFormat(format!("Unsupported file extension: .{}", ext)))
 }

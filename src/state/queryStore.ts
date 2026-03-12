@@ -4,6 +4,7 @@ import * as queryService from "../services/queryService";
 import * as databaseService from "../services/databaseService";
 import { listen } from "@tauri-apps/api/event";
 import { useDatabaseStore } from "./databaseStore";
+import { useToastStore } from "../utils/toast";
 
 interface StreamingState {
   queryId: string | null;
@@ -52,7 +53,14 @@ export const useQueryStore = create<QueryState>((set, get) => ({
 
   runQuery: async () => {
     const { sql } = get();
-    if (!sql.trim()) return;
+    if (!sql.trim()) {
+      useToastStore.getState().addToast({
+        type: "warning",
+        message: "Please enter a SQL query",
+        title: "Empty Query",
+      });
+      return;
+    }
     set({ isRunning: true, result: null, error: null, isStreaming: false });
     try {
       const selectedConnectionId = useDatabaseStore.getState().selectedConnectionId;
@@ -62,17 +70,37 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       set({ result, isRunning: false });
       get().loadHistory();
     } catch (e) {
-      set({ error: String(e), isRunning: false });
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      set({ error: errorMessage, isRunning: false });
+      useToastStore.getState().addToast({
+        type: "error",
+        message: errorMessage,
+        title: "Query Error",
+        duration: 7000,
+      });
     }
   },
 
   runStreamingQuery: async () => {
     const { sql } = get();
-    if (!sql.trim()) return;
+    if (!sql.trim()) {
+      useToastStore.getState().addToast({
+        type: "warning",
+        message: "Please enter a SQL query",
+        title: "Empty Query",
+      });
+      return;
+    }
 
     const selectedConnectionId = useDatabaseStore.getState().selectedConnectionId;
     if (selectedConnectionId) {
       // Streaming bridge is currently implemented for DataFusion datasets only.
+      useToastStore.getState().addToast({
+        type: "info",
+        message: "Streaming is available for local datasets only. Using standard query execution.",
+        title: "Database Streaming",
+        duration: 5000,
+      });
       await get().runQuery();
       return;
     }
@@ -113,12 +141,25 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         `query-error-${queryId}`,
         (event) => {
           set({ error: event.payload, isRunning: false });
+          useToastStore.getState().addToast({
+            type: "error",
+            message: event.payload,
+            title: "Streaming Query Error",
+            duration: 7000,
+          });
           unlistenChunk();
           unlistenError();
         }
       );
     } catch (e) {
-      set({ error: String(e), isRunning: false });
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      set({ error: errorMessage, isRunning: false });
+      useToastStore.getState().addToast({
+        type: "error",
+        message: errorMessage,
+        title: "Query Error",
+        duration: 7000,
+      });
     }
   },
 
