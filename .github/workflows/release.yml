@@ -72,4 +72,4 @@ jobs:
           releaseName: "ArrowLens v__VERSION__"
           releaseBody: "Automated release for ArrowLens. Install the asset for your platform from this release."
           releaseDraft: false
-          prerelease: false
+          prerelease: ${{ contains(github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name, '-') }}

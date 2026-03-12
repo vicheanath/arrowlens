@@ -45,6 +45,12 @@ function formatVersion(parts) {
   return `${base}-${parts.prereleaseTag}.${parts.prereleaseNumber}`;
 }
 
+function formatTauriVersion(parts) {
+  const base = `${parts.major}.${parts.minor}.${parts.patch}`;
+  if (!parts.prereleaseTag) return base;
+  return `${base}-${parts.prereleaseNumber}`;
+}
+
 function bumpStable(parts, kind) {
   const next = {
     major: parts.major,
@@ -116,6 +122,8 @@ function updateCargoVersion(fileText, nextVersion) {
 const packageJson = readJson(packageJsonPath);
 const currentVersion = packageJson.version;
 const nextVersion = resolveNextVersion(currentVersion, versionArg);
+const nextVersionParts = parseVersion(nextVersion);
+const nextTauriVersion = formatTauriVersion(nextVersionParts);
 
 packageJson.version = nextVersion;
 writeJson(packageJsonPath, packageJson);
@@ -128,10 +136,10 @@ if (packageLock.packages?.[""]) {
 writeJson(packageLockPath, packageLock);
 
 const cargoToml = fs.readFileSync(cargoTomlPath, "utf8");
-fs.writeFileSync(cargoTomlPath, updateCargoVersion(cargoToml, nextVersion));
+fs.writeFileSync(cargoTomlPath, updateCargoVersion(cargoToml, nextTauriVersion));
 
 const tauriConfig = readJson(tauriConfigPath);
-tauriConfig.version = nextVersion;
+tauriConfig.version = nextTauriVersion;
 writeJson(tauriConfigPath, tauriConfig);
 
-console.log(nextVersion);
+console.log(`${nextVersion} (tauri: ${nextTauriVersion})`);
