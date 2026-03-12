@@ -5,7 +5,7 @@ import { UiProvider } from "../state/uiStore";
 import { DatasetProvider } from "../state/datasetStore";
 import { DatabaseProvider } from "../state/databaseStore";
 import { QueryProvider } from "../state/queryStore";
-import { QueryTabsProvider } from "./QueryTabsContext";
+import { WorkspaceSessionProvider } from "../features/workspace-session";
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
   return (
@@ -15,7 +15,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
           <DatasetProvider>
             <DatabaseProvider>
               <QueryProvider>
-                <QueryTabsProvider>{children}</QueryTabsProvider>
+                <WorkspaceSessionProvider>{children}</WorkspaceSessionProvider>
               </QueryProvider>
             </DatabaseProvider>
           </DatasetProvider>

@@ -1,11 +1,9 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { HistoryEntry, QueryResult, SavedQuery, StreamChunk } from "../models/query";
-import * as queryService from "../services/queryService";
-import { listen } from "@tauri-apps/api/event";
-import { useDatabaseState } from "./databaseStore";
 import { useToast } from "../utils/toast";
 import { errorToMessage } from "../utils/errors";
 import { usePersistentState } from "../hooks/usePersistentState";
+import { useQueryRuntime } from "../features/query-runtime";
 
 interface StreamingState {
   queryId: string | null;
@@ -99,8 +97,8 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
   const [explainPlan, setExplainPlan] = useState<string | null>(null);
   const [isExplaining, setIsExplaining] = useState(false);
 
-  const { selectedConnectionId } = useDatabaseState();
   const { warning, error: showError } = useToast();
+  const runtime = useQueryRuntime();
 
   const setSql = useCallback((nextSql: string) => {
     setStoredSql(nextSql);
@@ -108,12 +106,12 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
 
   const loadHistory = useCallback(async () => {
     try {
-      const nextHistory = await queryService.getQueryHistory();
+      const nextHistory = await runtime.loadQueryHistory();
       setHistory(nextHistory);
     } catch {
       // Ignore history refresh failures.
     }
-  }, []);
+  }, [runtime]);
 
   const runQuery = useCallback<QueryExecutionActions["runQuery"]>(async (connectionIdOverride = undefined, sqlOverride = undefined) => {
     const effectiveSql = (sqlOverride ?? sql).trim();
@@ -122,20 +120,14 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const effectiveConnectionId = connectionIdOverride ?? selectedConnectionId;
+    const context = runtime.resolveExecutionContext(connectionIdOverride);
     setIsRunning(true);
     setResult(null);
     setError(null);
     setIsStreaming(false);
 
     try {
-      console.info("[Query Execute]", {
-        backend: effectiveConnectionId ? "database" : "datafusion",
-        connectionId: effectiveConnectionId ?? null,
-        sql: effectiveSql,
-      });
-
-      const nextResult = await queryService.runQuery(effectiveSql, effectiveConnectionId);
+      const nextResult = await runtime.runQueryRequest(effectiveSql, context);
       setResult(nextResult);
       setIsRunning(false);
       await loadHistory();
@@ -145,7 +137,7 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
       setIsRunning(false);
       showError(errorMessage, "Query Error", undefined, 7000);
     }
-  }, [sql, selectedConnectionId, loadHistory, showError, warning]);
+  }, [sql, loadHistory, runtime, showError, warning]);
 
   const runStreamingQuery = useCallback<QueryExecutionActions["runStreamingQuery"]>(async (connectionIdOverride = undefined, sqlOverride = undefined) => {
     const effectiveSql = (sqlOverride ?? sql).trim();
@@ -154,12 +146,7 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const effectiveConnectionId = connectionIdOverride ?? selectedConnectionId;
-    console.info("[Streaming Query Execute]", {
-      backend: effectiveConnectionId ? "database" : "datafusion",
-      connectionId: effectiveConnectionId ?? null,
-      sql: effectiveSql,
-    });
+    const context = runtime.resolveExecutionContext(connectionIdOverride);
 
     setIsRunning(true);
     setResult(null);
@@ -168,44 +155,26 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
     setStreaming({ queryId: null, columns: [], rows: [], isDone: false });
 
     try {
-      const queryId = await queryService.runStreamingQuery(effectiveSql, 500, effectiveConnectionId);
+      const queryId = await runtime.startStreamingQueryRequest(effectiveSql, context, 500);
       setStreaming((current) => ({ ...current, queryId }));
 
-      let unlistenChunk: (() => void) | null = null;
-      let unlistenError: (() => void) | null = null;
-      const cleanup = () => {
-        if (unlistenChunk) {
-          unlistenChunk();
-          unlistenChunk = null;
-        }
-        if (unlistenError) {
-          unlistenError();
-          unlistenError = null;
-        }
-      };
-
-      unlistenChunk = await listen<StreamChunk>(`query-chunk-${queryId}`, (event) => {
-        const chunk = event.payload;
-        if (chunk.done) {
+      await runtime.attachStreamingListeners(queryId, {
+        onChunk: (chunk: StreamChunk) => {
+          setStreaming((current) => ({
+            ...current,
+            columns: chunk.columns,
+            rows: [...current.rows, ...chunk.rows],
+          }));
+        },
+        onDone: () => {
           setIsRunning(false);
           setStreaming((current) => ({ ...current, isDone: true }));
-          cleanup();
-          return;
-        }
-
-        setStreaming((current) => ({
-          ...current,
-          columns: chunk.columns,
-          rows: [...current.rows, ...chunk.rows],
-        }));
-      });
-
-      unlistenError = await listen<{ message: string }>(`query-error-${queryId}`, (event) => {
-        const message = event.payload?.message ?? errorToMessage(event.payload);
-        setError(message);
-        setIsRunning(false);
-        showError(message, "Streaming Query Error", undefined, 7000);
-        cleanup();
+        },
+        onError: (message: string) => {
+          setError(message);
+          setIsRunning(false);
+          showError(message, "Streaming Query Error", undefined, 7000);
+        },
       });
     } catch (e) {
       const errorMessage = errorToMessage(e);
@@ -213,7 +182,7 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
       setIsRunning(false);
       showError(errorMessage, "Query Error", undefined, 7000);
     }
-  }, [sql, selectedConnectionId, showError, warning]);
+  }, [sql, runtime, showError, warning]);
 
   const cancelQuery = useCallback(() => setIsRunning(false), []);
 
@@ -239,10 +208,11 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
   const runExplain = useCallback<QueryExecutionActions["runExplain"]>(async (verbose = false, sqlOverride = undefined) => {
     const effectiveSql = (sqlOverride ?? sql).trim();
     if (!effectiveSql) return;
+    const context = runtime.resolveExecutionContext();
     setIsExplaining(true);
     setExplainPlan(null);
     try {
-      const plan = await queryService.explainQuery(effectiveSql, verbose, selectedConnectionId);
+      const plan = await runtime.runExplainRequest(effectiveSql, verbose, context);
       setExplainPlan(plan);
       setIsExplaining(false);
     } catch (e) {
@@ -250,7 +220,7 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
       setIsExplaining(false);
       showError(message, "EXPLAIN failed");
     }
-  }, [sql, selectedConnectionId, showError]);
+  }, [runtime, sql, showError]);
 
   const clearResult = useCallback(() => {
     setResult(null);

@@ -29,6 +29,8 @@ export interface DatasetTreeProps {
   onRemove: (id: string) => void;
   onColumnQuery: (table: string, col: string) => void;
   onImport: () => void;
+  canQueryDataset?: (id: string) => boolean;
+  canStatsDataset?: (id: string) => boolean;
 }
 
 export function DatasetTree({
@@ -44,6 +46,8 @@ export function DatasetTree({
   onRemove,
   onColumnQuery,
   onImport,
+  canQueryDataset,
+  canStatsDataset,
 }: DatasetTreeProps) {
   if (isLoading) {
     return (
@@ -76,6 +80,8 @@ export function DatasetTree({
         const isActive = d.id === selectedId;
         const isExpanded = expandedIds.has(d.id);
         const columns = isActive ? schema?.fields ?? null : null;
+        const canQuery = canQueryDataset?.(d.id) ?? true;
+        const canStats = canStatsDataset?.(d.id) ?? true;
 
         return (
           <div key={d.id}>
@@ -111,12 +117,17 @@ export function DatasetTree({
               )}
               <div className="opacity-0 group-hover:opacity-100 flex items-center flex-shrink-0">
                 <IconBtn
-                  onClick={(e) => { e.stopPropagation(); onQuery(d.name); }}
-                  title="Query (SELECT *)" icon={<Play size={11} />} variant="blue"
+                  onClick={(e) => { e.stopPropagation(); if (canQuery) onQuery(d.name); }}
+                  title={canQuery ? "Query (SELECT *)" : "Query is not supported for this source"}
+                  icon={<Play size={11} />}
+                  variant="blue"
+                  disabled={!canQuery}
                 />
                 <IconBtn
-                  onClick={(e) => { e.stopPropagation(); onStats(d.id); }}
-                  title="Statistics" icon={<BarChart2 size={11} />}
+                  onClick={(e) => { e.stopPropagation(); if (canStats) onStats(d.id); }}
+                  title={canStats ? "Statistics" : "Statistics are not supported for this source"}
+                  icon={<BarChart2 size={11} />}
+                  disabled={!canStats}
                 />
                 <IconBtn
                   onClick={(e) => { e.stopPropagation(); onRemove(d.id); }}
@@ -134,8 +145,14 @@ export function DatasetTree({
                     return (
                       <div
                         key={field.name}
-                        className="flex items-center h-6 pl-3 pr-2 gap-2 hover:bg-surface-3 cursor-pointer"
-                        onClick={() => onColumnQuery(d.name, field.name)}
+                        className={cn(
+                          "flex items-center h-6 pl-3 pr-2 gap-2",
+                          canQuery ? "hover:bg-surface-3 cursor-pointer" : "opacity-60 cursor-not-allowed",
+                        )}
+                        onClick={() => {
+                          if (!canQuery) return;
+                          onColumnQuery(d.name, field.name);
+                        }}
                         title={`${field.data_type}${field.nullable ? " · nullable" : ""}`}
                       >
                         <Columns size={11} className="flex-shrink-0 text-text-muted opacity-40" />

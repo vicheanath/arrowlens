@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { DatabaseType } from "../models/database";
-import { useDatasetActions, useDatasetCollectionState, useDatasetMetadataState } from "../state/datasetStore";
-import { useDatabaseActions, useDatabaseState } from "../state/databaseStore";
-import { useQuerySqlStore } from "../state/queryStore";
-import { buildSelectAll, buildSelectColumn } from "../utils/sql";
+import { DatabaseType } from "../../models/database";
+import { useDatasetActions, useDatasetCollectionState, useDatasetMetadataState } from "../../state/datasetStore";
+import { useDatabaseActions, useDatabaseState } from "../../state/databaseStore";
+import { useQuerySqlStore } from "../../state/queryStore";
+import { buildSelectAll, buildSelectColumn } from "../../utils/sql";
+import { useSourceCatalog } from "../source-catalog";
 
-export function useDatasetExplorerViewModel() {
+export function useSourceBrowserViewModel() {
   const [dbType, setDbType] = useState<DatabaseType>("sqlite");
   const [dbConnString, setDbConnString] = useState("");
   const [dbName, setDbName] = useState("");
@@ -18,16 +19,34 @@ export function useDatasetExplorerViewModel() {
 
   const { datasets, selectedId, isLoading, error } = useDatasetCollectionState();
   const { schema } = useDatasetMetadataState();
-  const { loadDatasets, importDataset, removeDataset, selectDataset, fetchStats } = useDatasetActions();
+  const { loadDatasets, importDataset, removeDataset, fetchStats } = useDatasetActions();
 
   const {
-    connections, selectedConnectionId, tablesByConnection,
-    isLoading: isDbLoading, isLoadingTables, error: dbError,
+    connections,
+    selectedConnectionId,
+    tablesByConnection,
+    isLoading: isDbLoading,
+    isLoadingTables,
+    error: dbError,
   } = useDatabaseState();
+
   const {
-    loadConnections, connectDatabase, connectSqliteDatabase,
-    disconnectDatabase, selectConnection, refreshTables,
+    loadConnections,
+    connectDatabase,
+    connectSqliteDatabase,
+    disconnectDatabase,
+    refreshTables,
   } = useDatabaseActions();
+
+  const {
+    activeSource,
+    sources,
+    datasetSources,
+    databaseSources,
+    canQuery,
+    canStats,
+    selectSource,
+  } = useSourceCatalog();
 
   const { setSql } = useQuerySqlStore();
 
@@ -43,8 +62,8 @@ export function useDatasetExplorerViewModel() {
         filters: [{ name: "Data Files", extensions: ["csv", "parquet", "json", "ndjson", "jsonl", "arrow"] }],
       });
       if (typeof file === "string") await importDataset(file);
-    } catch (e) {
-      console.error("Import cancelled", e);
+    } catch (errorValue) {
+      console.error("Import cancelled", errorValue);
     }
   };
 
@@ -62,6 +81,7 @@ export function useDatasetExplorerViewModel() {
       }
       return;
     }
+
     if (!dbConnString.trim()) return;
     await connectDatabase(dbType, dbConnString.trim(), dbName || undefined);
     setDbConnString("");
@@ -70,14 +90,14 @@ export function useDatasetExplorerViewModel() {
   };
 
   const handleTableQuery = (tableName: string) => {
-    const conn = connections.find((c) => c.id === selectedConnectionId);
-    setSql(buildSelectAll(tableName, 100, conn?.database_type ?? "sqlite"));
+    const dialect = activeSource?.kind === "database" ? activeSource.dialect : "sqlite";
+    setSql(buildSelectAll(tableName, 100, dialect));
   };
 
   const handleDatasetSelect = (id: string) => {
     if (id !== selectedId) {
-      selectDataset(id);
-      selectConnection(null);
+      const source = sources.find((entry) => entry.kind === "dataset" && entry.datasetId === id) ?? null;
+      void selectSource(source);
     }
     setExpandedDatasets((prev) => {
       const next = new Set(prev);
@@ -87,8 +107,11 @@ export function useDatasetExplorerViewModel() {
   };
 
   const handleConnectionSelect = (id: string) => {
-    selectConnection(id === selectedConnectionId ? null : id);
-    if (id !== selectedConnectionId) selectDataset(null);
+    const nextId = id === selectedConnectionId ? null : id;
+    const source = nextId
+      ? sources.find((entry) => entry.kind === "database" && entry.connectionId === nextId) ?? null
+      : null;
+    void selectSource(source);
   };
 
   const toggleConnectionExpanded = (id: string) => {
@@ -104,9 +127,36 @@ export function useDatasetExplorerViewModel() {
   };
 
   const selectedDataset = useMemo(
-    () => datasets.find((d) => d.id === selectedId),
+    () => datasets.find((dataset) => dataset.id === selectedId),
     [datasets, selectedId],
   );
+
+  const datasetCapabilityById = useMemo(() => {
+    const map = new Map<string, { canQuery: boolean; canStats: boolean }>();
+    for (const source of datasetSources) {
+      map.set(source.datasetId, {
+        canQuery: source.capabilities.includes("query"),
+        canStats: source.capabilities.includes("stats"),
+      });
+    }
+    return map;
+  }, [datasetSources]);
+
+  const databaseCapabilityById = useMemo(() => {
+    const map = new Map<string, { canQuery: boolean; canInspectTables: boolean }>();
+    for (const source of databaseSources) {
+      map.set(source.connectionId, {
+        canQuery: source.capabilities.includes("query"),
+        canInspectTables: source.capabilities.includes("tables"),
+      });
+    }
+    return map;
+  }, [databaseSources]);
+
+  const canQueryDataset = (id: string) => datasetCapabilityById.get(id)?.canQuery ?? true;
+  const canStatsDataset = (id: string) => datasetCapabilityById.get(id)?.canStats ?? true;
+  const canQueryConnection = (id: string) => databaseCapabilityById.get(id)?.canQuery ?? true;
+  const canInspectTablesConnection = (id: string) => databaseCapabilityById.get(id)?.canInspectTables ?? true;
 
   return {
     dbType,
@@ -118,17 +168,25 @@ export function useDatasetExplorerViewModel() {
     expandedDatasets,
     expandedConnections,
     datasets,
+    datasetSources,
     selectedId,
     schema,
     isLoading,
     error,
     connections,
+    databaseSources,
     selectedConnectionId,
     tablesByConnection,
     isDbLoading,
     isLoadingTables,
     dbError,
     selectedDataset,
+    canQuery,
+    canStats,
+    canQueryDataset,
+    canStatsDataset,
+    canQueryConnection,
+    canInspectTablesConnection,
     setDbType,
     setDbConnString,
     setDbName,

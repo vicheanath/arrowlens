@@ -5,10 +5,10 @@ import { SectionHeader, IconBtn } from "../components/sidebar/SidebarPrimitives"
 import { DatasetTree } from "../components/sidebar/DatasetTree";
 import { NewConnectionForm } from "../components/sidebar/NewConnectionForm";
 import { ConnectionsList } from "../components/sidebar/ConnectionsList";
-import { useDatasetExplorerViewModel } from "../view-models/useDatasetExplorerViewModel";
+import { useSourceBrowserViewModel } from "../features/source-browser";
 
 export function DatasetExplorer() {
-  const vm = useDatasetExplorerViewModel();
+  const vm = useSourceBrowserViewModel();
 
   const {
     dbType,
@@ -48,6 +48,12 @@ export function DatasetExplorer() {
     fetchStats,
     removeDataset,
     handleDatasetSelect,
+    canQuery,
+    canStats,
+    canQueryDataset,
+    canStatsDataset,
+    canQueryConnection,
+    canInspectTablesConnection,
     setSql,
     selectedDataset,
     buildSelectAll,
@@ -62,7 +68,7 @@ export function DatasetExplorer() {
       <SectionHeader
         label="Datasets"
         open={datasetsOpen}
-        onToggle={() => setDatasetsOpen(v => !v)}
+        onToggle={() => setDatasetsOpen(!datasetsOpen)}
         count={datasets.length > 0 ? datasets.length : undefined}
         primaryAction={{ icon: <Upload size={12} />, title: "Import dataset", onClick: handleImport }}
         secondaryAction={{ icon: <RefreshCw size={12} />, title: "Refresh", onClick: loadDatasets }}
@@ -83,6 +89,8 @@ export function DatasetExplorer() {
             onRemove={id => removeDataset(id)}
             onColumnQuery={(table, col) => setSql(buildSelectColumn(table, col, 100, "datafusion"))}
             onImport={handleImport}
+            canQueryDataset={canQueryDataset}
+            canStatsDataset={canStatsDataset}
           />
         </div>
       )}
@@ -93,12 +101,12 @@ export function DatasetExplorer() {
       <SectionHeader
         label="Connections"
         open={connectionsOpen}
-        onToggle={() => setConnectionsOpen(v => !v)}
+        onToggle={() => setConnectionsOpen(!connectionsOpen)}
         count={connections.length > 0 ? connections.length : undefined}
         primaryAction={{
           icon: <Plus size={12} />,
           title: addingConnection ? "Cancel new connection" : "New connection",
-          onClick: () => { setAddingConnection(v => !v); setConnectionsOpen(true); },
+          onClick: () => { setAddingConnection(!addingConnection); setConnectionsOpen(true); },
           active: addingConnection,
         }}
         secondaryAction={{ icon: <RefreshCw size={12} />, title: "Refresh connections", onClick: loadConnections }}
@@ -138,6 +146,8 @@ export function DatasetExplorer() {
             onDisconnect={id => disconnectDatabase(id)}
             onTableQuery={handleTableQuery}
             onAddConnection={() => { setAddingConnection(true); setConnectionsOpen(true); }}
+            canQueryConnection={canQueryConnection}
+            canInspectTablesConnection={canInspectTablesConnection}
           />
         </div>
       )}
@@ -169,13 +179,21 @@ export function DatasetExplorer() {
           </div>
           <div className="flex gap-1">
             <button
-              onClick={() => setSql(buildSelectAll(selectedDataset.name, 100, "datafusion"))}
+              onClick={() => {
+                if (!canQuery) return;
+                setSql(buildSelectAll(selectedDataset.name, 100, "datafusion"));
+              }}
+              disabled={!canQuery}
               className="btn-ghost text-xs py-0.5 px-2 gap-1"
             >
               <Play size={11} /> Query
             </button>
             <button
-              onClick={() => fetchStats(selectedDataset.id)}
+              onClick={() => {
+                if (!canStats) return;
+                fetchStats(selectedDataset.id);
+              }}
+              disabled={!canStats}
               className="btn-ghost text-xs py-0.5 px-2 gap-1"
             >
               <BarChart2 size={11} /> Stats

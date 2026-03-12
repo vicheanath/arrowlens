@@ -2,14 +2,12 @@ import React from "react";
 import CodeMirror, { EditorView } from "@uiw/react-codemirror";
 import { sql as sqlLang } from "@codemirror/lang-sql";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { Play, X, BarChart2, Table, FileSearch, Filter } from "lucide-react";
-import { cn } from "../utils/formatters";
-import { VirtualTable } from "../components/VirtualTable";
-import { ChartBuilder } from "../components/ChartBuilder";
+import { Play, X } from "lucide-react";
 import { ExportModal } from "../components/ExportModal";
-import { ExplainPanel } from "../components/query/ExplainPanel";
 import { QueryEditorTabs } from "../components/query/QueryEditorTabs";
 import { QueryToolbar } from "../components/query/QueryToolbar";
+import { QuerySuggestionsBar } from "../features/query-workspace/components/QuerySuggestionsBar";
+import { QueryResultPanel } from "../features/query-workspace/components/QueryResultPanel";
 import { getDefaultSqlForDialect, getDialectLabel } from "../utils/sql";
 import { useQueryWorkspaceViewModel } from "../view-models/useQueryWorkspaceViewModel";
 
@@ -38,6 +36,9 @@ export function QueryWorkspace() {
       <QueryToolbar
         isRunning={vm.isRunning}
         isExplaining={vm.isExplaining}
+        canQuery={vm.canQuery}
+        canStream={vm.canStream}
+        canExplain={vm.canExplain}
         hasResult={Boolean(vm.result)}
         hasStreamingRows={vm.isStreaming && vm.streaming.rows.length > 0}
         streamingRowsCount={vm.streaming.rows.length}
@@ -68,24 +69,12 @@ export function QueryWorkspace() {
         onInsertCountTemplate={() => vm.appendTemplate("SELECT COUNT(*) AS total\nFROM \"table_name\";")}
       />
 
-      <div className="flex-shrink-0 border-b border-border/60 bg-surface-1 px-3 py-1.5">
-        <div className="flex items-center gap-2 overflow-x-auto">
-          <span className="text-[11px] text-text-muted whitespace-nowrap">Suggested sources:</span>
-          {vm.sourceRecommendations.length === 0 && (
-            <span className="text-[11px] text-text-muted/70">No schema loaded yet</span>
-          )}
-          {vm.sourceRecommendations.map((sourceName) => (
-            <button
-              key={sourceName}
-              onClick={() => vm.appendTemplate(vm.buildSelectAll(sourceName, 100, vm.activeDialect))}
-              className="px-2 py-0.5 rounded border border-border/70 text-[11px] text-text-secondary hover:bg-surface-3 whitespace-nowrap"
-              title={`Insert SELECT for ${sourceName}`}
-            >
-              {sourceName}
-            </button>
-          ))}
-        </div>
-      </div>
+      <QuerySuggestionsBar
+        sourceRecommendations={vm.sourceRecommendations}
+        activeDialect={vm.activeDialect}
+        appendTemplate={vm.appendTemplate}
+        buildSelectAll={vm.buildSelectAll}
+      />
 
       <div className="flex-shrink-0" style={{ height: 220 }}>
         <CodeMirror
@@ -133,110 +122,22 @@ export function QueryWorkspace() {
         </div>
       )}
 
-      {(vm.hasCompletedResult || vm.displayColumns.length > 0 || vm.displayRows.length > 0 || vm.isRunning || vm.explainPlan) && (
-        <div className="flex-1 flex flex-col min-h-0">
-          <div className="flex-shrink-0 flex items-center gap-0 border-b border-border bg-surface-1 px-2">
-            <button
-              onClick={() => vm.setResultTab("table")}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 transition-colors",
-                vm.resultTab === "table"
-                  ? "border-accent-blue text-accent-blue"
-                  : "border-transparent text-text-muted hover:text-text-secondary",
-              )}
-            >
-              <Table size={12} />
-              Table
-              {vm.displayRows.length > 0 && (
-                <span className="ml-1 text-text-muted">
-                  ({vm.filteredRows.length !== vm.displayRows.length
-                    ? `${vm.filteredRows.length.toLocaleString()} / ${vm.displayRows.length.toLocaleString()}`
-                    : vm.displayRows.length.toLocaleString()})
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => vm.setResultTab("chart")}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 transition-colors",
-                vm.resultTab === "chart"
-                  ? "border-accent-blue text-accent-blue"
-                  : "border-transparent text-text-muted hover:text-text-secondary",
-              )}
-            >
-              <BarChart2 size={12} />
-              Chart
-            </button>
-            {vm.explainPlan && (
-              <button
-                onClick={() => vm.setResultTab("explain")}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 transition-colors",
-                  vm.resultTab === "explain"
-                    ? "border-accent-mauve text-accent-mauve"
-                    : "border-transparent text-text-muted hover:text-text-secondary",
-                )}
-              >
-                <FileSearch size={12} />
-                Explain
-              </button>
-            )}
-
-            {vm.resultTab === "table" && vm.displayRows.length > 0 && (
-              <div className="ml-auto flex items-center gap-1.5 px-2">
-                <Filter size={11} className="text-text-muted" />
-                <input
-                  type="text"
-                  placeholder="Filter rows..."
-                  value={vm.filterText}
-                  onChange={(e) => vm.setFilterText(e.target.value)}
-                  className="text-xs bg-surface-3 border border-border rounded px-2 py-0.5 text-text-secondary placeholder:text-text-muted outline-none focus:border-accent-blue w-32"
-                />
-                {vm.filterText && (
-                  <button onClick={() => vm.setFilterText("")} className="text-text-muted hover:text-text-primary">
-                    <X size={11} />
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="flex-1 overflow-hidden min-h-0">
-            {vm.resultTab === "table" && (
-              <div className="overflow-x-auto h-full">
-                {vm.displayColumns.length > 0 ? (
-                  <VirtualTable
-                    columns={vm.displayColumns}
-                    columnTypes={vm.displayTypes}
-                    rows={vm.filteredRows}
-                    height={vm.tableAreaHeight}
-                    className="h-full"
-                  />
-                ) : (
-                  <div className="h-full flex items-center justify-center text-text-muted text-sm">
-                    Query completed with 0 rows returned.
-                  </div>
-                )}
-              </div>
-            )}
-            {vm.resultTab === "chart" && (
-              <ChartBuilder
-                columns={vm.displayColumns}
-                columnTypes={vm.displayTypes}
-                rows={vm.displayRows}
-                className="h-full p-2"
-              />
-            )}
-            {vm.resultTab === "explain" && vm.explainPlan && (
-              <ExplainPanel
-                explainPlan={vm.explainPlan}
-                isExplaining={vm.isExplaining}
-                onRerun={vm.onExplainRerun}
-              />
-            )}
-          </div>
-        </div>
-      )}
+      <QueryResultPanel
+        hasCompletedResult={vm.hasCompletedResult}
+        isRunning={vm.isRunning}
+        displayColumns={vm.displayColumns}
+        displayRows={vm.displayRows}
+        displayTypes={vm.displayTypes}
+        filteredRows={vm.filteredRows}
+        resultTab={vm.resultTab}
+        explainPlan={vm.explainPlan}
+        isExplaining={vm.isExplaining}
+        filterText={vm.filterText}
+        setFilterText={vm.setFilterText}
+        setResultTab={vm.setResultTab}
+        onExplainRerun={vm.onExplainRerun}
+        tableAreaHeight={vm.tableAreaHeight}
+      />
 
       {!vm.isRunning && !vm.hasCompletedResult && vm.displayRows.length === 0 && !vm.error && !vm.explainPlan && (
         <div className="flex-1 flex flex-col items-center justify-center text-text-muted gap-2">

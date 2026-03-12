@@ -26,6 +26,8 @@ export interface ConnectionsListProps {
   onDisconnect: (id: string) => void;
   onTableQuery: (table: string) => void;
   onAddConnection: () => void;
+  canQueryConnection?: (id: string) => boolean;
+  canInspectTablesConnection?: (id: string) => boolean;
 }
 
 export function ConnectionsList({
@@ -40,6 +42,8 @@ export function ConnectionsList({
   onDisconnect,
   onTableQuery,
   onAddConnection,
+  canQueryConnection,
+  canInspectTablesConnection,
 }: ConnectionsListProps) {
   const groupTablesBySchema = (names: string[]) => {
     const grouped: Record<string, Array<{ fullName: string; tableName: string }>> = {};
@@ -74,6 +78,8 @@ export function ConnectionsList({
         const tables = tablesByConnection[c.id] ?? [];
         const groupedTables = groupTablesBySchema(tables);
         const meta = DB_META[c.database_type] ?? { label: c.database_type, color: "text-text-muted" };
+        const canQuery = canQueryConnection?.(c.id) ?? true;
+        const canInspectTables = canInspectTablesConnection?.(c.id) ?? true;
 
         return (
           <div key={c.id}>
@@ -87,9 +93,13 @@ export function ConnectionsList({
             >
               {/* Expand chevron */}
               <button
-                onClick={() => onToggleExpanded(c.id)}
+                onClick={() => {
+                  if (!canInspectTables) return;
+                  onToggleExpanded(c.id);
+                }}
+                disabled={!canInspectTables}
                 className="p-1 flex-shrink-0 text-text-muted hover:text-text-secondary rounded"
-                title={isExpanded ? "Collapse" : "Expand tables"}
+                title={canInspectTables ? (isExpanded ? "Collapse" : "Expand tables") : "Table inspection is not supported for this source"}
               >
                 {isExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
               </button>
@@ -152,18 +162,29 @@ export function ConnectionsList({
                       {schemaTables.map(({ fullName, tableName }) => (
                         <div
                           key={fullName}
-                          className="group/tbl flex items-center h-[26px] pl-3 pr-1 gap-1.5 hover:bg-surface-3 cursor-pointer transition-colors"
-                          onClick={() => onTableQuery(fullName)}
-                          title={`SELECT * FROM ${fullName}`}
+                          className={cn(
+                            "group/tbl flex items-center h-[26px] pl-3 pr-1 gap-1.5 transition-colors",
+                            canQuery ? "hover:bg-surface-3 cursor-pointer" : "opacity-60 cursor-not-allowed",
+                          )}
+                          onClick={() => {
+                            if (!canQuery) return;
+                            onTableQuery(fullName);
+                          }}
+                          title={canQuery ? `SELECT * FROM ${fullName}` : "Query is not supported for this source"}
                         >
                           <TableIcon size={12} className="flex-shrink-0 text-text-muted" />
                           <span className="flex-1 text-[11px] text-text-secondary truncate">{tableName}</span>
                           <IconBtn
-                            onClick={(e) => { e.stopPropagation(); onTableQuery(fullName); }}
-                            title="Query table"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!canQuery) return;
+                              onTableQuery(fullName);
+                            }}
+                            title={canQuery ? "Query table" : "Query is not supported for this source"}
                             icon={<Play size={11} />}
                             variant="blue"
                             className="opacity-0 group-hover/tbl:opacity-100"
+                            disabled={!canQuery}
                           />
                         </div>
                       ))}

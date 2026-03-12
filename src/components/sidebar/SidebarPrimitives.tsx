@@ -18,18 +18,22 @@ export interface IconBtnProps {
   icon: React.ReactNode;
   variant?: "default" | "blue" | "red";
   className?: string;
+  disabled?: boolean;
 }
 
-export function IconBtn({ onClick, title, icon, variant = "default", className }: IconBtnProps) {
+export function IconBtn({ onClick, title, icon, variant = "default", className, disabled = false }: IconBtnProps) {
   return (
     <button
+      type="button"
       onClick={onClick}
       title={title}
+      disabled={disabled}
       className={cn(
         "p-0.5 rounded transition-colors",
         variant === "blue"    && "text-text-muted hover:text-accent-blue hover:bg-accent-blue/10",
         variant === "red"     && "text-text-muted hover:text-accent-red  hover:bg-accent-red/10",
         variant === "default" && "text-text-muted hover:text-text-primary hover:bg-surface-4",
+        disabled && "opacity-40 cursor-not-allowed hover:bg-transparent hover:text-text-muted",
         className,
       )}
     >

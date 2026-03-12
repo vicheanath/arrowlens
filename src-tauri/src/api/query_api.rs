@@ -4,6 +4,7 @@ use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 use crate::cache::app_store::AppStore;
+use crate::engine::database_registry::DatabaseType;
 use crate::engine::database_registry::DatabaseRegistry;
 use crate::engine::dataset_registry::DatasetRegistry;
 use crate::engine::query_executor::{ExecutionTarget, ExecutorFactory};
@@ -199,12 +200,22 @@ pub async fn explain_query(
 
     let (target, explain_sql) = match connection_id {
         Some(id) => {
-            // PostgreSQL / external DB: use EXPLAIN ANALYZE for verbose, plain EXPLAIN otherwise.
-            let esql = if verbose {
-                format!("EXPLAIN ANALYZE {}", sql)
-            } else {
-                format!("EXPLAIN {}", sql)
+            let connection = db_registry
+                .get(&id)
+                .ok_or(AppError::DatabaseNotFound)?;
+
+            let esql = match connection.database_type {
+                DatabaseType::Postgres => build_postgres_explain_sql(&sql, verbose),
+                DatabaseType::Mysql => {
+                    if verbose {
+                        format!("EXPLAIN ANALYZE {}", sql)
+                    } else {
+                        format!("EXPLAIN {}", sql)
+                    }
+                }
+                DatabaseType::Sqlite => format!("EXPLAIN QUERY PLAN {}", sql),
             };
+
             (ExecutionTarget::Database { connection_id: id }, esql)
         }
         None => {
@@ -239,6 +250,17 @@ pub async fn explain_query(
     }).collect();
 
     Ok(plan_lines.join("\n"))
+}
+
+fn build_postgres_explain_sql(sql: &str, analyze: bool) -> String {
+    if analyze {
+        format!(
+            "EXPLAIN (ANALYZE, VERBOSE, BUFFERS, FORMAT TEXT) {}",
+            sql
+        )
+    } else {
+        format!("EXPLAIN (VERBOSE, FORMAT TEXT) {}", sql)
+    }
 }
 
 fn record_history(

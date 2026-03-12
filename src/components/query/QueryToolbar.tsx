@@ -6,6 +6,9 @@ import { formatDuration, cn } from "../../utils/formatters";
 interface QueryToolbarProps {
   isRunning: boolean;
   isExplaining: boolean;
+  canQuery: boolean;
+  canStream: boolean;
+  canExplain: boolean;
   hasResult: boolean;
   hasStreamingRows: boolean;
   streamingRowsCount: number;
@@ -34,6 +37,9 @@ interface QueryToolbarProps {
 export function QueryToolbar({
   isRunning,
   isExplaining,
+  canQuery,
+  canStream,
+  canExplain,
   hasResult,
   hasStreamingRows,
   streamingRowsCount,
@@ -60,15 +66,36 @@ export function QueryToolbar({
 }: QueryToolbarProps) {
   return (
     <div className="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border bg-surface-2">
-      <button onClick={onRun} disabled={isRunning} className="btn-primary text-xs flex items-center gap-1.5" title="Run Query (Cmd+Enter)">
+      <button
+        onClick={onRun}
+        disabled={isRunning || !canQuery}
+        className="btn-primary text-xs flex items-center gap-1.5"
+        title={canQuery ? "Run Query (Cmd+Enter)" : "Query execution is not supported for this source"}
+      >
         {isRunning ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Run
       </button>
 
-      <button onClick={onRunSelected} disabled={isRunning} className="btn-ghost text-xs flex items-center gap-1.5" title="Run selected SQL only">
+      <button
+        onClick={onRunSelected}
+        disabled={isRunning || !canQuery}
+        className="btn-ghost text-xs flex items-center gap-1.5"
+        title={canQuery ? "Run selected SQL only" : "Query execution is not supported for this source"}
+      >
         <Play size={13} /> Run Selected
       </button>
 
-      <button onClick={onStream} disabled={isRunning} className="btn-ghost text-xs flex items-center gap-1.5 text-accent-teal" title="Run Streaming (Cmd+Shift+Enter)">
+      <button
+        onClick={onStream}
+        disabled={isRunning || !canQuery || !canStream}
+        className="btn-ghost text-xs flex items-center gap-1.5 text-accent-teal"
+        title={
+          !canQuery
+            ? "Query execution is not supported for this source"
+            : canStream
+              ? "Run Streaming (Cmd+Shift+Enter)"
+              : "Streaming is not supported for this source"
+        }
+      >
         <Zap size={13} /> Stream
       </button>
 
@@ -80,9 +107,30 @@ export function QueryToolbar({
 
       <div className="h-4 w-px bg-border ml-1" />
 
-      <button onClick={onFormat} className="btn-ghost text-xs" title="Format SQL">Format</button>
-      <button onClick={onInsertSelectTemplate} className="btn-ghost text-xs" title="Insert SELECT template">SELECT *</button>
-      <button onClick={onInsertCountTemplate} className="btn-ghost text-xs" title="Insert COUNT template">COUNT</button>
+      <button
+        onClick={onFormat}
+        disabled={!canQuery}
+        className="btn-ghost text-xs"
+        title={canQuery ? "Format SQL" : "Query editing templates are disabled for this source"}
+      >
+        Format
+      </button>
+      <button
+        onClick={onInsertSelectTemplate}
+        disabled={!canQuery}
+        className="btn-ghost text-xs"
+        title={canQuery ? "Insert SELECT template" : "Query editing templates are disabled for this source"}
+      >
+        SELECT *
+      </button>
+      <button
+        onClick={onInsertCountTemplate}
+        disabled={!canQuery}
+        className="btn-ghost text-xs"
+        title={canQuery ? "Insert COUNT template" : "Query editing templates are disabled for this source"}
+      >
+        COUNT
+      </button>
 
       <div className="flex items-center gap-1 rounded bg-surface-3 px-2 py-1 text-[11px] text-text-muted">
         <Database size={11} />
@@ -91,7 +139,7 @@ export function QueryToolbar({
         <span>{getDialectLabel(activeDialect)}</span>
       </div>
 
-      {!selectedConnectionId && (
+      {canExplain && (
         <button onClick={onExplain} disabled={isRunning || isExplaining} className="btn-ghost text-xs flex items-center gap-1.5 text-text-muted" title="Show query execution plan">
           {isExplaining ? <Loader2 size={13} className="animate-spin" /> : <FileSearch size={13} />} Explain
         </button>
