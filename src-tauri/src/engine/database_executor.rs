@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use sqlx::postgres::{PgPoolOptions, PgRow};
-use sqlx::sqlite::{SqlitePoolOptions, SqliteRow};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{AnyPool, Column, Executor, Row, Statement, TypeInfo};
 use tauri::{AppHandle, Emitter};
 
@@ -11,6 +11,7 @@ use crate::engine::database_registry::{DatabaseConnectionInfo, DatabaseRegistry,
 use crate::engine::query_executor::QueryExecutor;
 use crate::error::{AppError, Result};
 use crate::state::active_queries;
+use crate::streaming::cell_serializer::{any_cell_to_json, pg_cell_to_json, sqlite_cell_to_json};
 use crate::streaming::record_batch_stream::StreamChunk;
 use crate::streaming::result_serializer::QueryResult;
 
@@ -634,110 +635,4 @@ impl QueryExecutor for DatabaseExecutor {
 
         Ok(())
     }
-}
-
-fn any_cell_to_json(row: &sqlx::any::AnyRow, idx: usize) -> serde_json::Value {
-    if let Ok(v) = row.try_get::<Option<bool>, _>(idx) {
-        return v
-            .map(serde_json::Value::Bool)
-            .unwrap_or(serde_json::Value::Null);
-    }
-    if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
-        return v
-            .map(|x| serde_json::Value::Number(serde_json::Number::from(x)))
-            .unwrap_or(serde_json::Value::Null);
-    }
-    if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
-        return v
-            .and_then(serde_json::Number::from_f64)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null);
-    }
-    if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
-        return v
-            .map(serde_json::Value::String)
-            .unwrap_or(serde_json::Value::Null);
-    }
-    if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
-        return v
-            .map(|bytes| serde_json::Value::String(format!("0x{}", hex_encode(&bytes))))
-            .unwrap_or(serde_json::Value::Null);
-    }
-
-    serde_json::Value::Null
-}
-
-fn sqlite_cell_to_json(row: &SqliteRow, idx: usize) -> serde_json::Value {
-    if let Ok(v) = row.try_get::<Option<bool>, _>(idx) {
-        return v
-            .map(serde_json::Value::Bool)
-            .unwrap_or(serde_json::Value::Null);
-    }
-    if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
-        return v
-            .map(|x| serde_json::Value::Number(serde_json::Number::from(x)))
-            .unwrap_or(serde_json::Value::Null);
-    }
-    if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
-        return v
-            .and_then(serde_json::Number::from_f64)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null);
-    }
-    if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
-        return v
-            .map(serde_json::Value::String)
-            .unwrap_or(serde_json::Value::Null);
-    }
-    if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
-        return v
-            .map(|bytes| serde_json::Value::String(format!("0x{}", hex_encode(&bytes))))
-            .unwrap_or(serde_json::Value::Null);
-    }
-
-    serde_json::Value::Null
-}
-
-fn pg_cell_to_json(row: &PgRow, idx: usize) -> serde_json::Value {
-    if let Ok(v) = row.try_get::<Option<serde_json::Value>, _>(idx) {
-        return v.unwrap_or(serde_json::Value::Null);
-    }
-    if let Ok(v) = row.try_get::<Option<bool>, _>(idx) {
-        return v
-            .map(serde_json::Value::Bool)
-            .unwrap_or(serde_json::Value::Null);
-    }
-    if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
-        return v
-            .map(|x| serde_json::Value::Number(serde_json::Number::from(x)))
-            .unwrap_or(serde_json::Value::Null);
-    }
-    if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
-        return v
-            .and_then(serde_json::Number::from_f64)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null);
-    }
-    if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
-        return v
-            .map(serde_json::Value::String)
-            .unwrap_or(serde_json::Value::Null);
-    }
-    if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
-        return v
-            .map(|bytes| serde_json::Value::String(format!("0x{}", hex_encode(&bytes))))
-            .unwrap_or(serde_json::Value::Null);
-    }
-
-    serde_json::Value::Null
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        out.push(HEX[(b >> 4) as usize] as char);
-        out.push(HEX[(b & 0x0f) as usize] as char);
-    }
-    out
 }

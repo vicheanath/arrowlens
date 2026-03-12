@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use tauri::State;
 
-use crate::engine::dataset_registry::{DatasetInfo, DatasetRegistry, FileType};
-use crate::error::{AppError, Result};
-use crate::loaders::{arrow_loader::ArrowLoader, csv_loader::CsvLoader, json_loader::JsonLoader, parquet_loader::ParquetLoader, DatasetLoader, LoaderPreview};
+use crate::engine::dataset_registry::{DatasetInfo, DatasetRegistry};
+use crate::error::Result;
+use crate::loaders::LoaderPreview;
+use crate::services::dataset_service::DatasetService;
 
 /// Load a dataset from disk and register it in the registry.
 #[tauri::command]
@@ -13,59 +14,9 @@ pub async fn load_dataset(
     name: Option<String>,
     registry: State<'_, Arc<DatasetRegistry>>,
 ) -> Result<DatasetInfo> {
-    // Verify file exists
-    if !std::path::Path::new(&path).exists() {
-        return Err(AppError::InvalidFilePath(format!("File not found: {}", path)));
-    }
-
-    let file_type = detect_file_type(&path)?;
-
-    let size_bytes = std::fs::metadata(&path)
-        .map(|m| m.len())
-        .unwrap_or(0);
-
-    let dataset_name = name.unwrap_or_else(|| {
-        std::path::Path::new(&path)
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "dataset".to_string())
-    });
-
-    let mut info = DatasetInfo::new(dataset_name, path.clone(), file_type.clone(), size_bytes);
-
-    // Count rows and infer schema
-    let (row_count, schema_json) = match &file_type {
-        FileType::Csv => {
-            let loader = CsvLoader;
-            let count = loader.count_rows(&path).await.unwrap_or(0);
-            let schema = loader.infer_schema(&path).await.unwrap_or_default();
-            (count, schema)
-        }
-        FileType::Parquet => {
-            let loader = ParquetLoader;
-            let count = loader.count_rows(&path).await.unwrap_or(0);
-            let schema = loader.infer_schema(&path).await.unwrap_or_default();
-            (count, schema)
-        }
-        FileType::Json => {
-            let loader = JsonLoader;
-            let count = loader.count_rows(&path).await.unwrap_or(0);
-            let schema = loader.infer_schema(&path).await.unwrap_or_default();
-            (count, schema)
-        }
-        FileType::Arrow => {
-            let loader = ArrowLoader;
-            let count = loader.count_rows(&path).await.unwrap_or(0);
-            let schema = loader.infer_schema(&path).await.unwrap_or_default();
-            (count, schema)
-        }
-    };
-
-    info.row_count = Some(row_count);
-    info.schema_json = Some(schema_json);
-
-    let id = registry.register(info.clone());
-    Ok(registry.get(&id).unwrap_or(info))
+    DatasetService::new(registry.inner().clone())
+        .load_dataset(path, name)
+        .await
 }
 
 /// List all registered datasets.
@@ -73,7 +24,9 @@ pub async fn load_dataset(
 pub async fn list_datasets(
     registry: State<'_, Arc<DatasetRegistry>>,
 ) -> Result<Vec<DatasetInfo>> {
-    Ok(registry.list())
+    DatasetService::new(registry.inner().clone())
+        .list_datasets()
+        .await
 }
 
 /// Remove a dataset from the registry.
@@ -82,7 +35,9 @@ pub async fn remove_dataset(
     id: String,
     registry: State<'_, Arc<DatasetRegistry>>,
 ) -> Result<bool> {
-    Ok(registry.remove(&id))
+    DatasetService::new(registry.inner().clone())
+        .remove_dataset(id)
+        .await
 }
 
 /// Get a preview of a dataset (first N rows).
@@ -92,31 +47,7 @@ pub async fn get_dataset_preview(
     limit: Option<usize>,
     registry: State<'_, Arc<DatasetRegistry>>,
 ) -> Result<LoaderPreview> {
-    let info = registry
-        .get(&id)
-        .ok_or_else(|| AppError::DatasetNotFound(id))?;
-
-    let limit = limit.unwrap_or(100);
-
-    let preview = match info.file_type {
-        FileType::Csv => CsvLoader.load_preview(&info.source_path, limit).await,
-        FileType::Parquet => ParquetLoader.load_preview(&info.source_path, limit).await,
-        FileType::Json => JsonLoader.load_preview(&info.source_path, limit).await,
-        FileType::Arrow => Err(AppError::UnsupportedFormat(
-            "Arrow IPC preview not yet implemented".into(),
-        )),
-    };
-
-    preview
-}
-
-fn detect_file_type(path: &str) -> Result<FileType> {
-    let ext = std::path::Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-
-    FileType::from_extension(&ext)
-        .ok_or_else(|| AppError::UnsupportedFormat(format!("Unsupported file extension: .{}", ext)))
+    DatasetService::new(registry.inner().clone())
+        .get_dataset_preview(id, limit)
+        .await
 }

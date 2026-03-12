@@ -5,6 +5,7 @@ pub mod cache;
 pub mod engine;
 pub mod error;
 pub mod loaders;
+pub mod services;
 pub mod state;
 pub mod streaming;
 

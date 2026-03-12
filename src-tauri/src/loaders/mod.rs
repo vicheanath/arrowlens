@@ -3,6 +3,7 @@ pub mod csv_loader;
 pub mod json_loader;
 pub mod parquet_loader;
 
+use crate::engine::dataset_registry::FileType;
 use crate::error::Result;
 
 /// Trait that all dataset loaders implement.
@@ -24,4 +25,17 @@ pub struct LoaderPreview {
     pub rows: Vec<Vec<serde_json::Value>>,
     pub row_count: usize,
     pub total_rows: Option<u64>,
+}
+
+pub struct LoaderFactory;
+
+impl LoaderFactory {
+    pub fn create(file_type: &FileType) -> Box<dyn DatasetLoader> {
+        match file_type {
+            FileType::Csv => Box::new(csv_loader::CsvLoader),
+            FileType::Parquet => Box::new(parquet_loader::ParquetLoader),
+            FileType::Json => Box::new(json_loader::JsonLoader),
+            FileType::Arrow => Box::new(arrow_loader::ArrowLoader),
+        }
+    }
 }

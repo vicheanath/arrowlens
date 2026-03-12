@@ -8,6 +8,7 @@ use arrow_schema::DataType;
 use datafusion::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::engine::batch_utils::extract_count_from_batches;
 use crate::engine::dataset_registry::{DatasetInfo, DatasetRegistry, FileType};
 use crate::error::{AppError, Result};
 
@@ -183,13 +184,7 @@ async fn run_count(ctx: &SessionContext, sql: &str) -> Option<u64> {
 }
 
 fn extract_count(batches: &[RecordBatch]) -> Option<u64> {
-    batches
-        .first()
-        .and_then(|b| {
-            if b.num_rows() == 0 { return None; }
-            let col = b.column(0);
-            col_f64(col, 0).map(|v| v as u64)
-        })
+    extract_count_from_batches(batches)
 }
 
 fn col_f64(col: &dyn Array, row: usize) -> Option<f64> {

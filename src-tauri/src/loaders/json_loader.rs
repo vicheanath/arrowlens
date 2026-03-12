@@ -1,5 +1,6 @@
 use datafusion::prelude::*;
 
+use crate::engine::batch_utils::extract_count_from_batches;
 use crate::error::Result;
 use crate::loaders::{DatasetLoader, LoaderPreview};
 use crate::streaming::result_serializer::serialize_batches;
@@ -71,17 +72,6 @@ impl DatasetLoader for JsonLoader {
             .await?;
         let df = ctx.sql("SELECT COUNT(*) FROM _count").await?;
         let batches = df.collect().await?;
-        Ok(batches
-            .first()
-            .and_then(|b| {
-                if b.num_rows() == 0 {
-                    return None;
-                }
-                use arrow_array::cast::AsArray;
-                use arrow_array::types::Int64Type;
-                let col = b.column(0);
-                Some(col.as_primitive::<Int64Type>().value(0) as u64)
-            })
-            .unwrap_or(0))
+        Ok(extract_count_from_batches(&batches).unwrap_or(0))
     }
 }

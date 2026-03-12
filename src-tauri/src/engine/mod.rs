@@ -1,3 +1,4 @@
+pub mod batch_utils;
 pub mod database_executor;
 pub mod database_registry;
 pub mod dataset_executor;
