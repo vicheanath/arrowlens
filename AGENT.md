@@ -1,3 +1,6 @@
+postgresql://postgres:postgres@localhost:5432/855betscrap
+
+
 You are a senior Rust systems architect and React frontend architect.
 
 Design and implement a production-grade desktop analytics application called:

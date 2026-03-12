@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useDebugStore } from "../state/debugStore";
+import { errorToMessage } from "../utils/errors";
 
 export interface ErrorResponse {
   code: string;
@@ -18,7 +19,7 @@ export async function invokeCommand<T>(
   try {
     return await invoke<T>(command, args);
   } catch (error: unknown) {
-    const rawMessage = error instanceof Error ? error.message : String(error);
+    const rawMessage = errorToMessage(error, "Unknown IPC error");
     const baseLog = {
       command,
       args,
@@ -68,7 +69,7 @@ export async function invokeCommand<T>(
       console.error("[IPC Error] Unparsed backend error", baseLog);
 
       const appError = new AppCommandError(
-        rawMessage,
+        errorToMessage(error, rawMessage),
         "UNKNOWN_ERROR",
         undefined,
         rawMessage,
@@ -89,15 +90,27 @@ export async function invokeCommand<T>(
 
     console.error("[IPC Error] Non-Error rejection", baseLog);
 
+    const appError = new AppCommandError(
+      errorToMessage(error, rawMessage),
+      "UNKNOWN_ERROR",
+      undefined,
+      rawMessage,
+      undefined,
+      command,
+      args,
+      error,
+    );
+
     useDebugStore.getState().recordError({
       timestamp: new Date().toISOString(),
       command,
       args,
-      code: "UNKNOWN_ERROR",
-      message: rawMessage,
+      code: appError.code,
+      message: appError.message,
       rawMessage,
+      parsedPayload: error,
     });
-    throw error;
+    throw appError;
   }
 }
 

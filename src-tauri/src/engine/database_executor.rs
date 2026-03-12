@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::sqlite::{SqlitePoolOptions, SqliteRow};
 use sqlx::{AnyPool, Column, Executor, Row, Statement, TypeInfo};
 use tauri::{AppHandle, Emitter};
@@ -47,10 +48,18 @@ impl DatabaseExecutor {
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
             }
             DatabaseType::Mysql => {
-                "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name"
+                                "SELECT CONCAT(table_schema, '.', table_name) AS name \
+                                 FROM information_schema.tables \
+                                 WHERE table_schema = DATABASE() \
+                                     AND table_type IN ('BASE TABLE', 'VIEW') \
+                                 ORDER BY table_schema, table_name"
             }
             DatabaseType::Postgres => {
-                "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name"
+                                "SELECT table_schema || '.' || table_name AS name \
+                                 FROM information_schema.tables \
+                                 WHERE table_schema NOT IN ('pg_catalog', 'information_schema') \
+                                     AND table_type IN ('BASE TABLE', 'VIEW', 'FOREIGN') \
+                                 ORDER BY table_schema, table_name"
             }
         };
 
@@ -258,6 +267,185 @@ impl DatabaseExecutor {
         pool.close().await;
         Ok(())
     }
+
+    async fn execute_postgres(&self, sql: &str) -> Result<QueryResult> {
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&self.info.connection_string)
+            .await
+            .map_err(|e| AppError::DatabaseConnectionError(e.to_string()))?;
+        let started = Instant::now();
+
+        let statement = pool
+            .prepare(sql)
+            .await
+            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
+
+        let rows = sqlx::query(sql)
+            .fetch_all(&pool)
+            .await
+            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
+
+        let clipped = rows.into_iter().take(10_000).collect::<Vec<_>>();
+
+        let (columns, column_types): (Vec<String>, Vec<String>) = if let Some(first) = clipped.first() {
+            let cols = first
+                .columns()
+                .iter()
+                .map(|c| c.name().to_string())
+                .collect::<Vec<String>>();
+            let types = first
+                .columns()
+                .iter()
+                .map(|c| c.type_info().name().to_string())
+                .collect::<Vec<String>>();
+            (cols, types)
+        } else {
+            let cols = statement
+                .columns()
+                .iter()
+                .map(|c| c.name().to_string())
+                .collect::<Vec<String>>();
+            let types = statement
+                .columns()
+                .iter()
+                .map(|c| c.type_info().name().to_string())
+                .collect::<Vec<String>>();
+            (cols, types)
+        };
+
+        let mut rows_out: Vec<Vec<serde_json::Value>> = Vec::with_capacity(clipped.len());
+        for row in &clipped {
+            let mut out = Vec::with_capacity(row.len());
+            for idx in 0..row.len() {
+                out.push(pg_cell_to_json(row, idx));
+            }
+            rows_out.push(out);
+        }
+
+        pool.close().await;
+        Ok(QueryResult {
+            columns,
+            column_types,
+            row_count: rows_out.len(),
+            rows: rows_out,
+            elapsed_ms: started.elapsed().as_millis() as u64,
+        })
+    }
+
+    async fn execute_streaming_postgres(
+        &self,
+        app: AppHandle,
+        query_id: String,
+        sql: &str,
+        chunk_size: usize,
+    ) -> Result<()> {
+        if active_queries::is_cancelled(&query_id) {
+            let _ = app.emit(
+                &format!("query-error-{}", query_id),
+                AppError::QueryCancelled.to_response(Some(sql.to_string())),
+            );
+            return Ok(());
+        }
+
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&self.info.connection_string)
+            .await
+            .map_err(|e| AppError::DatabaseConnectionError(e.to_string()))?;
+
+        let statement = pool
+            .prepare(sql)
+            .await
+            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
+
+        let rows = sqlx::query(sql)
+            .fetch_all(&pool)
+            .await
+            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
+
+        let (columns, _column_types): (Vec<String>, Vec<String>) = if let Some(first) = rows.first() {
+            let cols = first
+                .columns()
+                .iter()
+                .map(|c| c.name().to_string())
+                .collect::<Vec<_>>();
+            let types = first
+                .columns()
+                .iter()
+                .map(|c| c.type_info().name().to_string())
+                .collect::<Vec<_>>();
+            (cols, types)
+        } else {
+            let cols = statement
+                .columns()
+                .iter()
+                .map(|c| c.name().to_string())
+                .collect::<Vec<_>>();
+            let types = statement
+                .columns()
+                .iter()
+                .map(|c| c.type_info().name().to_string())
+                .collect::<Vec<_>>();
+            (cols, types)
+        };
+
+        let mut chunk_index = 0usize;
+        for chunk in rows.chunks(chunk_size) {
+            if active_queries::is_cancelled(&query_id) {
+                let _ = app.emit(
+                    &format!("query-chunk-{}", query_id),
+                    StreamChunk {
+                        query_id: query_id.clone(),
+                        chunk_index,
+                        columns: columns.clone(),
+                        rows: vec![],
+                        row_count: 0,
+                        done: true,
+                    },
+                );
+                pool.close().await;
+                return Ok(());
+            }
+
+            let mut rows_json = Vec::with_capacity(chunk.len());
+            for row in chunk {
+                let mut row_vals = Vec::with_capacity(columns.len());
+                for idx in 0..columns.len() {
+                    row_vals.push(pg_cell_to_json(row, idx));
+                }
+                rows_json.push(row_vals);
+            }
+
+            let _ = app.emit(
+                &format!("query-chunk-{}", query_id),
+                StreamChunk {
+                    query_id: query_id.clone(),
+                    chunk_index,
+                    columns: columns.clone(),
+                    row_count: rows_json.len(),
+                    rows: rows_json,
+                    done: false,
+                },
+            );
+            chunk_index += 1;
+        }
+
+        let _ = app.emit(
+            &format!("query-chunk-{}", query_id),
+            StreamChunk {
+                query_id,
+                chunk_index,
+                columns,
+                rows: vec![],
+                row_count: 0,
+                done: true,
+            },
+        );
+
+        pool.close().await;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -265,6 +453,9 @@ impl QueryExecutor for DatabaseExecutor {
     async fn execute(&self, sql: &str) -> Result<QueryResult> {
         if self.info.database_type == DatabaseType::Sqlite {
             return self.execute_sqlite(sql).await;
+        }
+        if self.info.database_type == DatabaseType::Postgres {
+            return self.execute_postgres(sql).await;
         }
 
         let pool = self.get_pool().await?;
@@ -336,6 +527,11 @@ impl QueryExecutor for DatabaseExecutor {
         if self.info.database_type == DatabaseType::Sqlite {
             return self
                 .execute_streaming_sqlite(app, query_id, sql, chunk_size)
+                .await;
+        }
+        if self.info.database_type == DatabaseType::Postgres {
+            return self
+                .execute_streaming_postgres(app, query_id, sql, chunk_size)
                 .await;
         }
 
@@ -472,6 +668,40 @@ fn any_cell_to_json(row: &sqlx::any::AnyRow, idx: usize) -> serde_json::Value {
 }
 
 fn sqlite_cell_to_json(row: &SqliteRow, idx: usize) -> serde_json::Value {
+    if let Ok(v) = row.try_get::<Option<bool>, _>(idx) {
+        return v
+            .map(serde_json::Value::Bool)
+            .unwrap_or(serde_json::Value::Null);
+    }
+    if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
+        return v
+            .map(|x| serde_json::Value::Number(serde_json::Number::from(x)))
+            .unwrap_or(serde_json::Value::Null);
+    }
+    if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
+        return v
+            .and_then(serde_json::Number::from_f64)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null);
+    }
+    if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
+        return v
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null);
+    }
+    if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
+        return v
+            .map(|bytes| serde_json::Value::String(format!("0x{}", hex_encode(&bytes))))
+            .unwrap_or(serde_json::Value::Null);
+    }
+
+    serde_json::Value::Null
+}
+
+fn pg_cell_to_json(row: &PgRow, idx: usize) -> serde_json::Value {
+    if let Ok(v) = row.try_get::<Option<serde_json::Value>, _>(idx) {
+        return v.unwrap_or(serde_json::Value::Null);
+    }
     if let Ok(v) = row.try_get::<Option<bool>, _>(idx) {
         return v
             .map(serde_json::Value::Bool)

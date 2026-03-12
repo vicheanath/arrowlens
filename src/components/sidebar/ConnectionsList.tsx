@@ -41,6 +41,18 @@ export function ConnectionsList({
   onTableQuery,
   onAddConnection,
 }: ConnectionsListProps) {
+  const groupTablesBySchema = (names: string[]) => {
+    const grouped: Record<string, Array<{ fullName: string; tableName: string }>> = {};
+    for (const fullName of names) {
+      const dotIndex = fullName.indexOf(".");
+      const schemaName = dotIndex > 0 ? fullName.slice(0, dotIndex) : "default";
+      const tableName = dotIndex > 0 ? fullName.slice(dotIndex + 1) : fullName;
+      if (!grouped[schemaName]) grouped[schemaName] = [];
+      grouped[schemaName].push({ fullName, tableName });
+    }
+    return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
+  };
+
   if (connections.length === 0) {
     return (
       <EmptyState
@@ -60,6 +72,7 @@ export function ConnectionsList({
         const isSelected = c.id === selectedConnectionId;
         const isExpanded = expandedIds.has(c.id);
         const tables = tablesByConnection[c.id] ?? [];
+        const groupedTables = groupTablesBySchema(tables);
         const meta = DB_META[c.database_type] ?? { label: c.database_type, color: "text-text-muted" };
 
         return (
@@ -129,22 +142,31 @@ export function ConnectionsList({
                 ) : tables.length === 0 ? (
                   <div className="pl-3 py-2 text-[11px] text-text-muted italic">No tables found</div>
                 ) : (
-                  tables.map((table) => (
-                    <div
-                      key={table}
-                      className="group/tbl flex items-center h-[26px] pl-3 pr-1 gap-1.5 hover:bg-surface-3 cursor-pointer transition-colors"
-                      onClick={() => onTableQuery(table)}
-                      title={`SELECT * FROM ${table}`}
-                    >
-                      <TableIcon size={12} className="flex-shrink-0 text-text-muted" />
-                      <span className="flex-1 text-[11px] text-text-secondary truncate">{table}</span>
-                      <IconBtn
-                        onClick={(e) => { e.stopPropagation(); onTableQuery(table); }}
-                        title="Query table"
-                        icon={<Play size={11} />}
-                        variant="blue"
-                        className="opacity-0 group-hover/tbl:opacity-100"
-                      />
+                  groupedTables.map(([schema, schemaTables]) => (
+                    <div key={schema}>
+                      {schema !== "default" && (
+                        <div className="h-6 pl-3 pr-2 flex items-center text-[10px] uppercase tracking-wider text-text-muted/80 bg-surface-2/40 border-y border-border/20">
+                          {schema}
+                        </div>
+                      )}
+                      {schemaTables.map(({ fullName, tableName }) => (
+                        <div
+                          key={fullName}
+                          className="group/tbl flex items-center h-[26px] pl-3 pr-1 gap-1.5 hover:bg-surface-3 cursor-pointer transition-colors"
+                          onClick={() => onTableQuery(fullName)}
+                          title={`SELECT * FROM ${fullName}`}
+                        >
+                          <TableIcon size={12} className="flex-shrink-0 text-text-muted" />
+                          <span className="flex-1 text-[11px] text-text-secondary truncate">{tableName}</span>
+                          <IconBtn
+                            onClick={(e) => { e.stopPropagation(); onTableQuery(fullName); }}
+                            title="Query table"
+                            icon={<Play size={11} />}
+                            variant="blue"
+                            className="opacity-0 group-hover/tbl:opacity-100"
+                          />
+                        </div>
+                      ))}
                     </div>
                   ))
                 )}

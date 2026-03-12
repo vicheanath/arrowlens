@@ -80,10 +80,19 @@ export function quoteIdentifier(
   identifier: string,
   dialect: SqlDialect = "datafusion",
 ): string {
-  if (dialect === "mysql") {
-    return `\`${identifier.replace(/`/g, "``")}\``;
-  }
-  return `"${identifier.replace(/"/g, '""')}"`;
+  const quotePart = (part: string): string => {
+    if (dialect === "mysql") {
+      return `\`${part.replace(/`/g, "``")}\``;
+    }
+    return `"${part.replace(/"/g, '""')}"`;
+  };
+
+  // Support qualified identifiers such as schema.table and db.schema.table.
+  return identifier
+    .split(".")
+    .filter((part) => part.length > 0)
+    .map(quotePart)
+    .join(".");
 }
 
 /** Extract the table names referenced in a SQL query (naive implementation). */

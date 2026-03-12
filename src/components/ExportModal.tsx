@@ -4,6 +4,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { exportQueryResults, ExportFormat } from "../services/exportService";
 import { useToastStore } from "../utils/toast";
 import { cn } from "../utils/formatters";
+import { errorToMessage } from "../utils/errors";
 
 interface ExportModalProps {
   sql: string;
@@ -62,7 +63,7 @@ export function ExportModal({ sql, rowCount, onClose }: ExportModalProps) {
       addToast({
         type: "error",
         title: "Export failed",
-        message: e instanceof Error ? e.message : String(e),
+        message: errorToMessage(e),
         duration: 7000,
       });
     } finally {

@@ -4,6 +4,7 @@ import { DatasetStats } from "../models/statistics";
 import * as datasetService from "../services/datasetService";
 import * as statsService from "../services/statsService";
 import { useToastStore } from "../utils/toast";
+import { errorToMessage } from "../utils/errors";
 
 interface DatasetState {
   datasets: DatasetInfo[];
@@ -41,7 +42,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
       const datasets = await datasetService.listDatasets();
       set({ datasets, isLoading: false });
     } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorMessage = errorToMessage(e);
       set({ error: errorMessage, isLoading: false });
       useToastStore.getState().addToast({
         type: "error",
@@ -67,7 +68,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
         duration: 4000,
       });
     } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorMessage = errorToMessage(e);
       set({ error: errorMessage, isLoading: false });
       useToastStore.getState().addToast({
         type: "error",
@@ -93,7 +94,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
         duration: 3000,
       });
     } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorMessage = errorToMessage(e);
       set({ error: errorMessage });
       useToastStore.getState().addToast({
         type: "error",
@@ -116,7 +117,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
       const preview = await datasetService.getDatasetPreview(id, limit);
       set({ preview });
     } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorMessage = errorToMessage(e);
       set({ error: errorMessage });
       // Only show preview errors as info since they're not critical
       if (!errorMessage.includes("not yet implemented")) {
@@ -135,7 +136,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
       const schema = await statsService.getSchema(id);
       set({ schema });
     } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorMessage = errorToMessage(e);
       set({ error: errorMessage });
       if (!errorMessage.includes("not yet implemented")) {
         useToastStore.getState().addToast({
@@ -154,7 +155,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
       const stats = await statsService.getStatistics(id);
       set({ stats, isLoadingStats: false });
     } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorMessage = errorToMessage(e);
       set({ error: errorMessage, isLoadingStats: false });
       useToastStore.getState().addToast({
         type: "error",

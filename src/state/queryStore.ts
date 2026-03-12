@@ -5,6 +5,7 @@ import * as queryService from "../services/queryService";
 import { listen } from "@tauri-apps/api/event";
 import { useDatabaseStore } from "./databaseStore";
 import { useToastStore } from "../utils/toast";
+import { errorToMessage } from "../utils/errors";
 
 interface StreamingState {
   queryId: string | null;
@@ -78,7 +79,7 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
       set({ result, isRunning: false });
       get().loadHistory();
     } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorMessage = errorToMessage(e);
       set({ error: errorMessage, isRunning: false });
       useToastStore.getState().addToast({
         type: "error",
@@ -151,7 +152,7 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
       unlistenError = await listen<{ message: string }>(
         `query-error-${queryId}`,
         (event) => {
-          const msg = event.payload?.message ?? String(event.payload);
+          const msg = event.payload?.message ?? errorToMessage(event.payload);
           set({ error: msg, isRunning: false });
           useToastStore.getState().addToast({
             type: "error",
@@ -163,7 +164,7 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
         }
       );
     } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorMessage = errorToMessage(e);
       set({ error: errorMessage, isRunning: false });
       useToastStore.getState().addToast({
         type: "error",
@@ -215,7 +216,7 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
       const plan = await queryService.explainQuery(sql, verbose);
       set({ explainPlan: plan, isExplaining: false });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorToMessage(e);
       set({ isExplaining: false });
       useToastStore.getState().addToast({ type: "error", title: "EXPLAIN failed", message: msg });
     }

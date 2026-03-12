@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { DatabaseConnectionInfo, DatabaseType } from "../models/database";
 import * as databaseService from "../services/databaseService";
 import { useToastStore } from "../utils/toast";
+import { errorToMessage } from "../utils/errors";
 
 interface DatabaseState {
   connections: DatabaseConnectionInfo[];
@@ -43,7 +44,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
           : null;
       set({ connections, selectedConnectionId: stillSelected, isLoading: false });
     } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorMessage = errorToMessage(e);
       set({ error: errorMessage, isLoading: false });
       useToastStore.getState().addToast({
         type: "error",
@@ -74,7 +75,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
         duration: 4000,
       });
     } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorMessage = errorToMessage(e);
       set({ error: errorMessage, isLoading: false });
       useToastStore.getState().addToast({
         type: "error",
@@ -106,7 +107,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
         duration: 3000,
       });
     } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorMessage = errorToMessage(e);
       set({ error: errorMessage });
       useToastStore.getState().addToast({
         type: "error",
@@ -137,7 +138,7 @@ export const useDatabaseStore = create<DatabaseState>((set, get) => ({
         isLoadingTables: false,
       }));
     } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorMessage = errorToMessage(e);
       set({ error: errorMessage, isLoadingTables: false });
       useToastStore.getState().addToast({
         type: "error",
