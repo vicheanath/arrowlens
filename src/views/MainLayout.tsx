@@ -99,7 +99,7 @@ export function MainLayout() {
       {/* Main area */}
       <div className="flex flex-1 min-h-0">
         {/* Activity bar */}
-        <nav className="flex-shrink-0 w-10 flex flex-col items-center py-2 gap-1 bg-surface-1 border-r border-border">
+        <nav className="flex-shrink-0 w-11 flex flex-col py-1 bg-surface-1 border-r border-border">
           {NAV_ITEMS.map((item) => (
             <button
               key={item.id}
@@ -108,10 +108,10 @@ export function MainLayout() {
                 if (!isSidebarOpen) toggleSidebar();
               }}
               className={cn(
-                "p-2 rounded transition-colors",
+                "relative flex justify-center py-3 border-l-2 transition-colors",
                 sidebarSection === item.id && isSidebarOpen
-                  ? "text-accent-blue bg-accent-blue/10"
-                  : "text-text-muted hover:text-text-secondary hover:bg-surface-4"
+                  ? "text-text-primary border-accent-blue"
+                  : "text-text-muted border-transparent hover:text-text-secondary hover:bg-surface-3/50",
               )}
               title={item.label}
             >

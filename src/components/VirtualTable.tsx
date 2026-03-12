@@ -2,17 +2,21 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { GridChildComponentProps, VariableSizeGrid } from "react-window";
 import { cn } from "../utils/formatters";
 import { cellToString } from "../utils/formatters";
-import { isRightAligned, shortTypeName, TYPE_TAG_CLASS } from "../utils/dataTypes";
-import { getTypeCategory } from "../models/dataset";
+import { isRightAligned } from "../utils/dataTypes";
 import { SortConfig, SortOrder } from "../models/query";
-import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
-
-const COL_WIDTH = 160;
-const ROW_HEIGHT = 32;
-const HEADER_HEIGHT = 56;
-const FOOTER_HEIGHT = 24;
-const MAX_COL_WIDTH = 320;
-const MIN_COL_WIDTH = 60;
+import {
+  COL_WIDTH,
+  ROW_HEIGHT,
+  HEADER_HEIGHT,
+  FOOTER_HEIGHT,
+  STATUS_HEIGHT,
+  EditingCell,
+  CellPosition,
+  PendingEdit,
+} from "./table/tableTypes";
+import { compareCellValues, clampWidth, clampIndex, isPrintableKey } from "./table/tableUtils";
+import { HeaderColumn } from "./table/HeaderColumn";
+import { EditableCellView } from "./table/EditableCellView";
 
 interface VirtualTableProps {
   columns: string[];
@@ -22,172 +26,6 @@ interface VirtualTableProps {
   className?: string;
   editable?: boolean;
   onCellEdit?: (rowIndex: number, columnIndex: number, value: string) => void;
-}
-
-interface EditingCell {
-  rowIndex: number;
-  columnIndex: number;
-  draftValue: string;
-}
-
-interface CellPosition {
-  rowIndex: number;
-  columnIndex: number;
-}
-
-interface PendingEdit {
-  rowIndex: number;
-  columnIndex: number;
-  value: string;
-}
-
-interface HeaderColumnProps {
-  column: string;
-  index: number;
-  width: number;
-  dataType: string;
-  sortOrder: SortOrder;
-  onSort: (column: string) => void;
-  onResizeStart: (event: React.MouseEvent, index: number) => void;
-}
-
-function HeaderColumn({
-  column,
-  index,
-  width,
-  dataType,
-  sortOrder,
-  onSort,
-  onResizeStart,
-}: HeaderColumnProps) {
-  const category = getTypeCategory(dataType);
-  const tagClass = TYPE_TAG_CLASS[category];
-
-  return (
-    <div
-      className="relative flex-shrink-0 border-r border-border/40"
-      style={{ width, minWidth: width }}
-    >
-      <button
-        type="button"
-        className="w-full h-full flex flex-col justify-center px-3 cursor-pointer select-none group/col hover:bg-surface-4 transition-colors"
-        onClick={() => onSort(column)}
-        title={`Sort by ${column}`}
-      >
-        <div className="flex items-center gap-1 text-text-primary text-sm font-medium text-truncate">
-          <span className="text-truncate flex-1 text-left">{column}</span>
-          <span className="opacity-40 group-hover/col:opacity-100 transition-opacity">
-            {sortOrder === "asc" ? (
-              <ArrowUp size={12} />
-            ) : sortOrder === "desc" ? (
-              <ArrowDown size={12} />
-            ) : (
-              <ChevronsUpDown size={12} className="opacity-0 group-hover/col:opacity-100" />
-            )}
-          </span>
-        </div>
-        {dataType && (
-          <span className={cn("mt-0.5 self-start", tagClass)}>{shortTypeName(dataType)}</span>
-        )}
-      </button>
-
-      <div
-        className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-accent-blue/30"
-        onMouseDown={(event) => onResizeStart(event, index)}
-        title="Resize column"
-      />
-    </div>
-  );
-}
-
-interface EditableCellViewProps {
-  isEditing: boolean;
-  value: unknown;
-  rightAligned: boolean;
-  draftValue: string;
-  onDraftChange: (value: string) => void;
-  onCancel: () => void;
-  onSave: (nextMove?: { rowDelta: number; colDelta: number }) => void;
-}
-
-function EditableCellView({
-  isEditing,
-  value,
-  rightAligned,
-  draftValue,
-  onDraftChange,
-  onCancel,
-  onSave,
-}: EditableCellViewProps) {
-  const isNull = value === null || value === undefined;
-
-  if (isEditing) {
-    return (
-      <div className="w-full flex items-center gap-1.5">
-        <input
-          autoFocus
-          value={draftValue}
-          onChange={(event) => onDraftChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              onSave({ rowDelta: 1, colDelta: 0 });
-            }
-            if (event.key === "Tab") {
-              event.preventDefault();
-              onSave({ rowDelta: 0, colDelta: event.shiftKey ? -1 : 1 });
-            }
-            if (event.key === "Escape") {
-              event.preventDefault();
-              onCancel();
-            }
-          }}
-          className={cn(
-            "w-full text-xs bg-surface-4 border border-accent-blue/40 rounded px-2 py-1 outline-none",
-            rightAligned ? "text-right" : "text-left"
-          )}
-        />
-      </div>
-    );
-  }
-
-  return (
-    isNull ? (
-      <span className="text-text-muted italic text-xs">null</span>
-    ) : (
-      <span className="text-truncate">{cellToString(value)}</span>
-    )
-  );
-}
-
-function compareCellValues(a: unknown, b: unknown): number {
-  if (a === null || a === undefined) return b === null || b === undefined ? 0 : 1;
-  if (b === null || b === undefined) return -1;
-
-  if (typeof a === "number" && typeof b === "number") {
-    return a < b ? -1 : a > b ? 1 : 0;
-  }
-
-  if (typeof a === "boolean" && typeof b === "boolean") {
-    return a === b ? 0 : a ? 1 : -1;
-  }
-
-  return String(a).localeCompare(String(b), undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
-}
-
-function clampWidth(width: number): number {
-  return Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, width));
-}
-
-function clampIndex(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function isPrintableKey(event: React.KeyboardEvent): boolean {
-  return event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey;
 }
 
 export function VirtualTable({
@@ -253,7 +91,8 @@ export function VirtualTable({
 
   const totalWidth = colWidths.reduce((a, b) => a + b, 0);
   const gridWidth = Math.max(1, viewportWidth);
-  const gridHeight = Math.max(80, height - HEADER_HEIGHT - FOOTER_HEIGHT);
+  const pendingBarHeight = editable && pendingEdits.size > 0 ? 32 : 0;
+  const gridHeight = Math.max(120, height - HEADER_HEIGHT - FOOTER_HEIGHT - STATUS_HEIGHT - pendingBarHeight);
 
   const columnWidth = useCallback(
     (index: number) => colWidths[index] ?? COL_WIDTH,
@@ -416,11 +255,11 @@ export function VirtualTable({
       <div
         style={style}
         className={cn(
-          "flex items-center px-3 border-b border-r border-border/40 group",
+          "relative flex items-center px-3 border-b border-r border-border/40 group",
           "overflow-hidden text-sm font-mono",
           rowIndex % 2 === 0 ? "bg-surface-2" : "bg-surface-1",
           right ? "justify-end" : "justify-start",
-          isSelected && !isEditing && "ring-1 ring-inset ring-accent-blue/70"
+          isSelected && !isEditing && "ring-1 ring-inset ring-accent-blue/80 bg-accent-blue/5"
         )}
         onClick={() => {
           containerRef.current?.focus();
@@ -517,6 +356,26 @@ export function VirtualTable({
         }
       }}
     >
+      <div className="flex-shrink-0 h-7 bg-surface-2 border-b border-border/70 flex items-center justify-between px-3 text-[11px] font-mono text-text-muted">
+        <div className="flex items-center gap-3">
+          <span>
+            Cell: {selectedCell ? `R${selectedCell.rowIndex + 1} · C${selectedCell.columnIndex + 1}` : "-"}
+          </span>
+          {selectedCell && (
+            <span className="text-text-secondary text-truncate max-w-[280px]">
+              {columns[selectedCell.columnIndex] ?? ""}
+            </span>
+          )}
+          {editingCell && <span className="text-accent-blue">Editing</span>}
+          {pendingEdits.size > 0 && <span className="text-amber-300">{pendingEdits.size} unsaved</span>}
+        </div>
+        <div className="hidden md:flex items-center gap-3 opacity-80">
+          <span>Enter/F2 edit</span>
+          <span>Tab next</span>
+          <span>Esc cancel</span>
+        </div>
+      </div>
+
       {/* Column headers */}
       <div
         className="flex-shrink-0 bg-surface-3 border-b border-border overflow-hidden"

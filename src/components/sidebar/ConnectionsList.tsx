@@ -1,0 +1,158 @@
+import React from "react";
+import {
+  Database,
+  ChevronRight,
+  ChevronDown,
+  RefreshCw,
+  Table as TableIcon,
+  Play,
+  X,
+  Plus,
+} from "lucide-react";
+import { cn } from "../../utils/formatters";
+import { DatabaseConnectionInfo } from "../../models/database";
+import { LoadingSpinner } from "../LoadingSpinner";
+import { IconBtn, EmptyState, DB_META } from "./SidebarPrimitives";
+
+export interface ConnectionsListProps {
+  connections: DatabaseConnectionInfo[];
+  selectedConnectionId: string | null;
+  tablesByConnection: Record<string, string[]>;
+  isLoadingTables: boolean;
+  expandedIds: Set<string>;
+  onSelectConnection: (id: string) => void;
+  onToggleExpanded: (id: string) => void;
+  onRefreshTables: (id: string) => void;
+  onDisconnect: (id: string) => void;
+  onTableQuery: (table: string) => void;
+  onAddConnection: () => void;
+}
+
+export function ConnectionsList({
+  connections,
+  selectedConnectionId,
+  tablesByConnection,
+  isLoadingTables,
+  expandedIds,
+  onSelectConnection,
+  onToggleExpanded,
+  onRefreshTables,
+  onDisconnect,
+  onTableQuery,
+  onAddConnection,
+}: ConnectionsListProps) {
+  if (connections.length === 0) {
+    return (
+      <EmptyState
+        message="No connections yet. Add a SQLite file, MySQL, or PostgreSQL database."
+        action={{
+          label: "New Connection",
+          icon: <Plus size={12} />,
+          onClick: onAddConnection,
+        }}
+      />
+    );
+  }
+
+  return (
+    <>
+      {connections.map((c) => {
+        const isSelected = c.id === selectedConnectionId;
+        const isExpanded = expandedIds.has(c.id);
+        const tables = tablesByConnection[c.id] ?? [];
+        const meta = DB_META[c.database_type] ?? { label: c.database_type, color: "text-text-muted" };
+
+        return (
+          <div key={c.id}>
+            {/* Connection row */}
+            <div
+              className={cn(
+                "group flex items-center h-7 pl-1 pr-1 gap-0.5 transition-colors cursor-default",
+                "hover:bg-surface-3",
+                isSelected && "bg-accent-blue/10 border-l-2 border-l-accent-blue",
+              )}
+            >
+              {/* Expand chevron */}
+              <button
+                onClick={() => onToggleExpanded(c.id)}
+                className="p-1 flex-shrink-0 text-text-muted hover:text-text-secondary rounded"
+                title={isExpanded ? "Collapse" : "Expand tables"}
+              >
+                {isExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              </button>
+
+              {/* Colored DB icon */}
+              <Database size={13} className={cn("flex-shrink-0", meta.color)} />
+
+              {/* Name button — routes queries to this connection */}
+              <button
+                onClick={() => onSelectConnection(c.id)}
+                className={cn(
+                  "flex-1 text-left px-1.5 text-xs truncate min-w-0 py-0",
+                  isSelected
+                    ? "text-text-primary font-medium"
+                    : "text-text-secondary hover:text-text-primary",
+                )}
+                title={`${c.connection_string}\nClick to route queries to this connection`}
+              >
+                {c.name}
+              </button>
+
+              {/* Type badge */}
+              <span className={cn("text-[10px] flex-shrink-0 font-mono opacity-40 pr-1", meta.color)}>
+                {meta.label}
+              </span>
+
+              {/* Hover actions */}
+              <div className="opacity-0 group-hover:opacity-100 flex items-center flex-shrink-0">
+                <IconBtn
+                  onClick={() => onRefreshTables(c.id)}
+                  title="Refresh tables"
+                  icon={<RefreshCw size={11} />}
+                />
+                <IconBtn
+                  onClick={() => onDisconnect(c.id)}
+                  title="Disconnect"
+                  icon={<X size={11} />}
+                  variant="red"
+                />
+              </div>
+            </div>
+
+            {/* Tables (when expanded) */}
+            {isExpanded && (
+              <div className="border-l border-border/30 ml-[22px]">
+                {isLoadingTables ? (
+                  <div className="pl-3 py-2 flex items-center gap-1.5 text-[11px] text-text-muted">
+                    <LoadingSpinner size={11} /> Loading tables…
+                  </div>
+                ) : tables.length === 0 ? (
+                  <div className="pl-3 py-2 text-[11px] text-text-muted italic">No tables found</div>
+                ) : (
+                  tables.map((table) => (
+                    <div
+                      key={table}
+                      className="group/tbl flex items-center h-[26px] pl-3 pr-1 gap-1.5 hover:bg-surface-3 cursor-pointer transition-colors"
+                      onClick={() => onTableQuery(table)}
+                      title={`SELECT * FROM ${table}`}
+                    >
+                      <TableIcon size={12} className="flex-shrink-0 text-text-muted" />
+                      <span className="flex-1 text-[11px] text-text-secondary truncate">{table}</span>
+                      <IconBtn
+                        onClick={(e) => { e.stopPropagation(); onTableQuery(table); }}
+                        title="Query table"
+                        icon={<Play size={11} />}
+                        variant="blue"
+                        className="opacity-0 group-hover/tbl:opacity-100"
+                      />
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
