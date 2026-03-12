@@ -1,5 +1,4 @@
 import React from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels";
 import {
   Database,
@@ -17,9 +16,8 @@ import { QueryHistoryView } from "./QueryHistoryView";
 import { StatusBar } from "../components/StatusBar";
 import { CommandPalette } from "../components/CommandPalette";
 import { SavedQueriesPanel } from "../components/SavedQueriesPanel";
-import { useUiStore, SidebarSection } from "../state/uiStore";
-import { useDatasetStore } from "../state/datasetStore";
-import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { SidebarSection } from "../state/uiStore";
+import { useMainLayoutViewModel } from "../view-models/useMainLayoutViewModel";
 import { cn } from "../utils/formatters";
 
 const NAV_ITEMS: { id: SidebarSection; icon: React.ReactNode; label: string }[] = [
@@ -35,33 +33,8 @@ export function MainLayout() {
     setSidebarSection,
     toggleSidebar,
     openCommandPalette,
-  } = useUiStore();
-
-  const { importDataset } = useDatasetStore();
-
-  useKeyboardShortcuts([
-    { key: "k", meta: true, handler: () => openCommandPalette() },
-    { key: "b", meta: true, handler: () => toggleSidebar() },
-  ]);
-
-  const handleImport = async () => {
-    try {
-      const file = await openDialog({
-        multiple: false,
-        filters: [
-          {
-            name: "Data Files",
-            extensions: ["csv", "parquet", "json", "ndjson", "jsonl", "arrow"],
-          },
-        ],
-      });
-      if (typeof file === "string") {
-        await importDataset(file);
-      }
-    } catch (e) {
-      console.error("Import cancelled", e);
-    }
-  };
+    handleImport,
+  } = useMainLayoutViewModel();
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-surface-0">

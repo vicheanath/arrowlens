@@ -27,14 +27,14 @@ interface QueryState {
   isExplaining: boolean;
 
   setSql: (sql: string) => void;
-  runQuery: (connectionIdOverride?: string | null) => Promise<void>;
-  runStreamingQuery: (connectionIdOverride?: string | null) => Promise<void>;
+  runQuery: (connectionIdOverride?: string | null, sqlOverride?: string) => Promise<void>;
+  runStreamingQuery: (connectionIdOverride?: string | null, sqlOverride?: string) => Promise<void>;
   cancelQuery: () => void;
   loadHistory: () => Promise<void>;
   saveQuery: (name: string, tags?: string[]) => void;
   removeSavedQuery: (id: string) => void;
   loadFromHistory: (entry: HistoryEntry) => void;
-  runExplain: (verbose?: boolean) => Promise<void>;
+  runExplain: (verbose?: boolean, sqlOverride?: string) => Promise<void>;
   clearResult: () => void;
   clearError: () => void;
 }
@@ -57,9 +57,10 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
 
   setSql: (sql: string) => set({ sql }),
 
-  runQuery: async (connectionIdOverride = undefined) => {
+  runQuery: async (connectionIdOverride = undefined, sqlOverride = undefined) => {
     const { sql } = get();
-    if (!sql.trim()) {
+    const effectiveSql = (sqlOverride ?? sql).trim();
+    if (!effectiveSql) {
       useToastStore.getState().addToast({
         type: "warning",
         message: "Please enter a SQL query",
@@ -73,9 +74,9 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
       console.info("[Query Execute]", {
         backend: selectedConnectionId ? "database" : "datafusion",
         connectionId: selectedConnectionId ?? null,
-        sql,
+        sql: effectiveSql,
       });
-      const result = await queryService.runQuery(sql, selectedConnectionId);
+      const result = await queryService.runQuery(effectiveSql, selectedConnectionId);
       set({ result, isRunning: false });
       get().loadHistory();
     } catch (e) {
@@ -90,9 +91,10 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
     }
   },
 
-  runStreamingQuery: async (connectionIdOverride = undefined) => {
+  runStreamingQuery: async (connectionIdOverride = undefined, sqlOverride = undefined) => {
     const { sql } = get();
-    if (!sql.trim()) {
+    const effectiveSql = (sqlOverride ?? sql).trim();
+    if (!effectiveSql) {
       useToastStore.getState().addToast({
         type: "warning",
         message: "Please enter a SQL query",
@@ -105,7 +107,7 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
     console.info("[Streaming Query Execute]", {
       backend: selectedConnectionId ? "database" : "datafusion",
       connectionId: selectedConnectionId ?? null,
-      sql,
+      sql: effectiveSql,
     });
 
     set({
@@ -117,7 +119,7 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
     });
 
     try {
-      const queryId = await queryService.runStreamingQuery(sql, 500, selectedConnectionId);
+      const queryId = await queryService.runStreamingQuery(effectiveSql, 500, selectedConnectionId);
 
       set((s) => ({ streaming: { ...s.streaming, queryId } }));
 
@@ -208,12 +210,13 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
     set({ sql: entry.sql });
   },
 
-  runExplain: async (verbose = false) => {
+  runExplain: async (verbose = false, sqlOverride = undefined) => {
     const { sql } = get();
-    if (!sql.trim()) return;
+    const effectiveSql = (sqlOverride ?? sql).trim();
+    if (!effectiveSql) return;
     set({ isExplaining: true, explainPlan: null });
     try {
-      const plan = await queryService.explainQuery(sql, verbose);
+      const plan = await queryService.explainQuery(effectiveSql, verbose);
       set({ explainPlan: plan, isExplaining: false });
     } catch (e) {
       const msg = errorToMessage(e);

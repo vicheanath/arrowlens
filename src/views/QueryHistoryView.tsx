@@ -1,12 +1,12 @@
 import React from "react";
 import { Clock, Check, AlertCircle } from "lucide-react";
-import { useQueryStore } from "../state/queryStore";
+import { useQueryHistoryViewModel } from "../view-models/useQueryHistoryViewModel";
 import { formatDate, formatDuration, cn } from "../utils/formatters";
 
 export function QueryHistoryView() {
-  const { history, loadFromHistory } = useQueryStore();
+  const { history, loadFromHistory, isEmpty } = useQueryHistoryViewModel();
 
-  if (history.length === 0) {
+  if (isEmpty) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-text-muted gap-2">
         <Clock size={28} className="opacity-30" />
