@@ -72,7 +72,7 @@ impl DatabaseExecutor {
                  ORDER BY table_schema, table_name"
             }
             DatabaseType::Postgres => {
-                "SELECT table_schema AS schema_name, table_name \
+                "SELECT table_schema::text AS schema_name, table_name::text AS table_name \
                  FROM information_schema.tables \
                  WHERE table_schema NOT IN ('pg_catalog', 'information_schema') \
                      AND table_type IN ('BASE TABLE', 'VIEW', 'FOREIGN') \
