@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #0d0d14;
+    color: #cdd6f4;
+    font-family: "Inter", system-ui, sans-serif;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #313149;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3a3a52;
+  }
+
+  /* Selection */
+  ::selection {
+    background: #89b4fa40;
+    color: #cdd6f4;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium
+           transition-colors duration-100 cursor-pointer select-none;
+  }
+  .btn-primary {
+    @apply btn bg-accent-blue text-surface-0 hover:bg-blue-400 active:scale-95;
+  }
+  .btn-ghost {
+    @apply btn text-text-secondary hover:text-text-primary hover:bg-surface-4 active:scale-95;
+  }
+  .btn-danger {
+    @apply btn text-accent-red hover:bg-accent-red/10 active:scale-95;
+  }
+
+  .panel {
+    @apply bg-surface-2 border border-border rounded-lg overflow-hidden;
+  }
+
+  .input {
+    @apply bg-surface-3 border border-border rounded px-2 py-1 text-sm
+           text-text-primary placeholder:text-text-muted
+           focus:outline-none focus:border-accent-blue/60 focus:ring-1 focus:ring-accent-blue/30
+           transition-colors duration-100;
+  }
+
+  .tag {
+    @apply inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono;
+  }
+  .tag-string  { @apply tag bg-accent-green/10  text-accent-green; }
+  .tag-numeric { @apply tag bg-accent-blue/10   text-accent-blue; }
+  .tag-date    { @apply tag bg-accent-yellow/10 text-accent-yellow; }
+  .tag-boolean { @apply tag bg-accent-mauve/10  text-accent-mauve; }
+  .tag-binary  { @apply tag bg-text-muted/10    text-text-muted; }
+  .tag-other   { @apply tag bg-surface-4        text-text-muted; }
+}
+
+@layer utilities {
+  .font-mono {
+    font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .text-truncate {
+    @apply overflow-hidden text-ellipsis whitespace-nowrap;
+  }
+}
