@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::cache::app_store::AppStore;
+use crate::engine::database_executor::DatabaseSchemaEntry;
 use crate::engine::database_executor::DatabaseExecutor;
 use crate::engine::database_registry::{DatabaseConnectionInfo, DatabaseRegistry, DatabaseType};
 use crate::error::Result;
@@ -68,6 +69,15 @@ pub async fn list_database_tables(
 ) -> Result<Vec<String>> {
     let executor = DatabaseExecutor::from_registry(registry.inner().clone(), &connection_id)?;
     executor.list_tables().await
+}
+
+#[tauri::command]
+pub async fn list_database_schema_tree(
+    connection_id: String,
+    registry: State<'_, Arc<DatabaseRegistry>>,
+) -> Result<Vec<DatabaseSchemaEntry>> {
+    let executor = DatabaseExecutor::from_registry(registry.inner().clone(), &connection_id)?;
+    executor.list_schema_tree().await
 }
 
 fn normalize_connection_string(database_type: &DatabaseType, input: &str) -> String {

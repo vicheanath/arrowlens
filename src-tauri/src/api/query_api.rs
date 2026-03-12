@@ -17,6 +17,15 @@ static HISTORY: once_cell::sync::Lazy<parking_lot::Mutex<Vec<HistoryEntry>>> =
     once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(Vec::new()));
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SqlTemplateKind {
+    WorkspaceDefault,
+    SelectAll,
+    SelectColumn,
+    Count,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HistoryEntry {
     pub id: String,
     pub sql: String,
@@ -180,6 +189,42 @@ pub async fn get_query_history() -> Result<Vec<HistoryEntry>> {
     Ok(entries)
 }
 
+#[tauri::command]
+pub async fn build_sql_template(
+    template_kind: SqlTemplateKind,
+    connection_id: Option<String>,
+    table_name: Option<String>,
+    column_name: Option<String>,
+    limit: Option<usize>,
+    db_registry: State<'_, Arc<DatabaseRegistry>>,
+) -> Result<String> {
+    let dialect = resolve_sql_dialect(connection_id.as_deref(), db_registry.inner().as_ref())?;
+    let resolved_limit = limit.unwrap_or(100);
+
+    match template_kind {
+        SqlTemplateKind::WorkspaceDefault => Ok(build_workspace_default_sql(dialect)),
+        SqlTemplateKind::SelectAll => {
+            let table = table_name.ok_or_else(|| {
+                AppError::QuerySyntaxError("Table name is required for SELECT template".to_string())
+            })?;
+            Ok(build_select_all_sql(&table, resolved_limit, dialect))
+        }
+        SqlTemplateKind::SelectColumn => {
+            let table = table_name.ok_or_else(|| {
+                AppError::QuerySyntaxError("Table name is required for column template".to_string())
+            })?;
+            let column = column_name.ok_or_else(|| {
+                AppError::QuerySyntaxError("Column name is required for column template".to_string())
+            })?;
+            Ok(build_select_column_sql(&table, &column, resolved_limit, dialect))
+        }
+        SqlTemplateKind::Count => {
+            let table = table_name.unwrap_or_else(|| "table_name".to_string());
+            Ok(build_count_sql(&table, dialect))
+        }
+    }
+}
+
 /// Run EXPLAIN on a SQL query and return the query plan as a string.
 /// If `connection_id` is provided, routes to an external DB (e.g. PostgreSQL);
 /// otherwise uses DataFusion on loaded datasets.
@@ -260,6 +305,105 @@ fn build_postgres_explain_sql(sql: &str, analyze: bool) -> String {
         )
     } else {
         format!("EXPLAIN (VERBOSE, FORMAT TEXT) {}", sql)
+    }
+}
+
+fn resolve_sql_dialect(
+    connection_id: Option<&str>,
+    db_registry: &DatabaseRegistry,
+) -> Result<Option<DatabaseType>> {
+    match connection_id {
+        Some(id) => db_registry
+            .get(id)
+            .map(|connection| Some(connection.database_type))
+            .ok_or(AppError::DatabaseNotFound),
+        None => Ok(None),
+    }
+}
+
+fn build_workspace_default_sql(dialect: Option<DatabaseType>) -> String {
+    let label = dialect_label(dialect);
+    let example_table = if dialect.is_none() { "my_table" } else { "users" };
+    let example_identifier = quote_identifier(example_table, dialect);
+
+    format!(
+        "-- ArrowLens SQL Workspace\n-- Active dialect: {}\n-- Example:\n-- SELECT * FROM {} LIMIT 100;\n",
+        label, example_identifier
+    )
+}
+
+fn build_select_all_sql(table_name: &str, limit: usize, dialect: Option<DatabaseType>) -> String {
+    let table = resolve_table_identifier(table_name, dialect);
+    format!("SELECT *\nFROM {}\nLIMIT {};", table, limit)
+}
+
+fn build_select_column_sql(
+    table_name: &str,
+    column_name: &str,
+    limit: usize,
+    dialect: Option<DatabaseType>,
+) -> String {
+    let table = resolve_table_identifier(table_name, dialect);
+    let column = quote_identifier(column_name, dialect);
+    format!("SELECT {}\nFROM {}\nLIMIT {};", column, table, limit)
+}
+
+fn build_count_sql(table_name: &str, dialect: Option<DatabaseType>) -> String {
+    let table = resolve_table_identifier(table_name, dialect);
+    format!("SELECT COUNT(*) AS total\nFROM {};", table)
+}
+
+fn resolve_table_identifier(table_name: &str, dialect: Option<DatabaseType>) -> String {
+    let resolved = if dialect.is_none() {
+        sanitize_table_name(table_name)
+    } else {
+        table_name.to_string()
+    };
+
+    quote_identifier(&resolved, dialect)
+}
+
+fn quote_identifier(identifier: &str, dialect: Option<DatabaseType>) -> String {
+    let quote_part = |part: &str| match dialect {
+        Some(DatabaseType::Mysql) => format!("`{}`", part.replace('`', "``")),
+        _ => format!("\"{}\"", part.replace('"', "\"\"")),
+    };
+
+    identifier
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .map(quote_part)
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+fn dialect_label(dialect: Option<DatabaseType>) -> &'static str {
+    match dialect {
+        Some(DatabaseType::Sqlite) => "SQLite",
+        Some(DatabaseType::Mysql) => "MySQL",
+        Some(DatabaseType::Postgres) => "PostgreSQL",
+        None => "DataFusion",
+    }
+}
+
+fn sanitize_table_name(name: &str) -> String {
+    let sanitized = name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_start_matches(|character: char| character.is_ascii_digit())
+        .to_lowercase();
+
+    if sanitized.is_empty() {
+        "dataset".to_string()
+    } else {
+        sanitized
     }
 }
 

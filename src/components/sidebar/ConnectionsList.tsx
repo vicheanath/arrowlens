@@ -10,7 +10,7 @@ import {
   Plus,
 } from "lucide-react";
 import { cn } from "../../utils/formatters";
-import { DatabaseConnectionInfo } from "../../models/database";
+import { DatabaseConnectionInfo, DatabaseSchemaEntry } from "../../models/database";
 import { LoadingSpinner } from "../LoadingSpinner";
 import { IconBtn, EmptyState, DB_META } from "./SidebarPrimitives";
 
@@ -18,6 +18,7 @@ export interface ConnectionsListProps {
   connections: DatabaseConnectionInfo[];
   selectedConnectionId: string | null;
   tablesByConnection: Record<string, string[]>;
+  schemaTreeByConnection: Record<string, DatabaseSchemaEntry[]>;
   isLoadingTables: boolean;
   expandedIds: Set<string>;
   onSelectConnection: (id: string) => void;
@@ -34,6 +35,7 @@ export function ConnectionsList({
   connections,
   selectedConnectionId,
   tablesByConnection,
+  schemaTreeByConnection,
   isLoadingTables,
   expandedIds,
   onSelectConnection,
@@ -45,17 +47,17 @@ export function ConnectionsList({
   canQueryConnection,
   canInspectTablesConnection,
 }: ConnectionsListProps) {
-  const groupTablesBySchema = (names: string[]) => {
-    const grouped: Record<string, Array<{ fullName: string; tableName: string }>> = {};
-    for (const fullName of names) {
-      const dotIndex = fullName.indexOf(".");
-      const schemaName = dotIndex > 0 ? fullName.slice(0, dotIndex) : "default";
-      const tableName = dotIndex > 0 ? fullName.slice(dotIndex + 1) : fullName;
-      if (!grouped[schemaName]) grouped[schemaName] = [];
-      grouped[schemaName].push({ fullName, tableName });
-    }
-    return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
-  };
+  const [expandedSchemas, setExpandedSchemas] = React.useState<Set<string>>(new Set());
+
+  const toggleSchema = React.useCallback((connectionId: string, schemaName: string) => {
+    const schemaKey = `${connectionId}:${schemaName}`;
+    setExpandedSchemas((current) => {
+      const next = new Set(current);
+      if (next.has(schemaKey)) next.delete(schemaKey);
+      else next.add(schemaKey);
+      return next;
+    });
+  }, []);
 
   if (connections.length === 0) {
     return (
@@ -76,7 +78,7 @@ export function ConnectionsList({
         const isSelected = c.id === selectedConnectionId;
         const isExpanded = expandedIds.has(c.id);
         const tables = tablesByConnection[c.id] ?? [];
-        const groupedTables = groupTablesBySchema(tables);
+        const schemaTree = schemaTreeByConnection[c.id] ?? [];
         const meta = DB_META[c.database_type] ?? { label: c.database_type, color: "text-text-muted" };
         const canQuery = canQueryConnection?.(c.id) ?? true;
         const canInspectTables = canInspectTablesConnection?.(c.id) ?? true;
@@ -152,44 +154,55 @@ export function ConnectionsList({
                 ) : tables.length === 0 ? (
                   <div className="pl-3 py-2 text-[11px] text-text-muted italic">No tables found</div>
                 ) : (
-                  groupedTables.map(([schema, schemaTables]) => (
-                    <div key={schema}>
-                      {schema !== "default" && (
-                        <div className="h-6 pl-3 pr-2 flex items-center text-[10px] uppercase tracking-wider text-text-muted/80 bg-surface-2/40 border-y border-border/20">
-                          {schema}
-                        </div>
-                      )}
-                      {schemaTables.map(({ fullName, tableName }) => (
-                        <div
-                          key={fullName}
-                          className={cn(
-                            "group/tbl flex items-center h-[26px] pl-3 pr-1 gap-1.5 transition-colors",
-                            canQuery ? "hover:bg-surface-3 cursor-pointer" : "opacity-60 cursor-not-allowed",
-                          )}
-                          onClick={() => {
-                            if (!canQuery) return;
-                            onTableQuery(fullName);
-                          }}
-                          title={canQuery ? `SELECT * FROM ${fullName}` : "Query is not supported for this source"}
+                  schemaTree.map((schema) => {
+                    const schemaKey = `${c.id}:${schema.name}`;
+                    const isSchemaExpanded = expandedSchemas.has(schemaKey) || schemaTree.length === 1;
+
+                    return (
+                      <div key={schema.name}>
+                        <button
+                          type="button"
+                          onClick={() => toggleSchema(c.id, schema.name)}
+                          className="w-full h-6 pl-2.5 pr-2 flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-text-muted/80 bg-surface-2/40 border-y border-border/20 hover:bg-surface-3/50"
+                          title={`${schema.tables.length} tables`}
                         >
-                          <TableIcon size={12} className="flex-shrink-0 text-text-muted" />
-                          <span className="flex-1 text-[11px] text-text-secondary truncate">{tableName}</span>
-                          <IconBtn
-                            onClick={(e) => {
-                              e.stopPropagation();
+                          {isSchemaExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                          <span className="truncate">{schema.name}</span>
+                          <span className="ml-auto text-[10px] opacity-60">{schema.tables.length}</span>
+                        </button>
+
+                        {isSchemaExpanded && schema.tables.map((table) => (
+                          <div
+                            key={table.full_name}
+                            className={cn(
+                              "group/tbl flex items-center h-[26px] pl-5 pr-1 gap-1.5 transition-colors",
+                              canQuery ? "hover:bg-surface-3 cursor-pointer" : "opacity-60 cursor-not-allowed",
+                            )}
+                            onClick={() => {
                               if (!canQuery) return;
-                              onTableQuery(fullName);
+                              onTableQuery(table.full_name);
                             }}
-                            title={canQuery ? "Query table" : "Query is not supported for this source"}
-                            icon={<Play size={11} />}
-                            variant="blue"
-                            className="opacity-0 group-hover/tbl:opacity-100"
-                            disabled={!canQuery}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  ))
+                            title={canQuery ? `SELECT * FROM ${table.full_name}` : "Query is not supported for this source"}
+                          >
+                            <TableIcon size={12} className="flex-shrink-0 text-text-muted" />
+                            <span className="flex-1 text-[11px] text-text-secondary truncate">{table.name}</span>
+                            <IconBtn
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!canQuery) return;
+                                onTableQuery(table.full_name);
+                              }}
+                              title={canQuery ? "Query table" : "Query is not supported for this source"}
+                              icon={<Play size={11} />}
+                              variant="blue"
+                              className="opacity-0 group-hover/tbl:opacity-100"
+                              disabled={!canQuery}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             )}

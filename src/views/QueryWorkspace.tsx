@@ -6,9 +6,8 @@ import { Play, X } from "lucide-react";
 import { ExportModal } from "../components/ExportModal";
 import { QueryEditorTabs } from "../components/query/QueryEditorTabs";
 import { QueryToolbar } from "../components/query/QueryToolbar";
-import { QuerySuggestionsBar } from "../features/query-workspace/components/QuerySuggestionsBar";
 import { QueryResultPanel } from "../features/query-workspace/components/QueryResultPanel";
-import { getDefaultSqlForDialect, getDialectLabel } from "../utils/sql";
+import { getDialectLabel } from "../utils/sql";
 import { useQueryWorkspaceViewModel } from "../view-models/useQueryWorkspaceViewModel";
 
 export function QueryWorkspace() {
@@ -65,15 +64,8 @@ export function QueryWorkspace() {
         onExplain={vm.onExplain}
         onExport={() => vm.setShowExportModal(true)}
         onFormat={() => vm.onEditorSqlChange(vm.formatSql(vm.activeTabSql ?? ""))}
-        onInsertSelectTemplate={() => vm.appendTemplate("SELECT *\nFROM \"table_name\"\nLIMIT 100;")}
-        onInsertCountTemplate={() => vm.appendTemplate("SELECT COUNT(*) AS total\nFROM \"table_name\";")}
-      />
-
-      <QuerySuggestionsBar
-        sourceRecommendations={vm.sourceRecommendations}
-        activeDialect={vm.activeDialect}
-        appendTemplate={vm.appendTemplate}
-        buildSelectAll={vm.buildSelectAll}
+        onInsertSelectTemplate={() => { void vm.insertSelectTemplate(); }}
+        onInsertCountTemplate={() => { void vm.insertCountTemplate(); }}
       />
 
       <div className="flex-shrink-0" style={{ height: 220 }}>
@@ -86,7 +78,7 @@ export function QueryWorkspace() {
           extensions={editorExtensions}
           theme={oneDark}
           height="220px"
-          placeholder={getDefaultSqlForDialect(vm.activeDialect)}
+          placeholder={vm.defaultSqlTemplate}
           style={{
             fontSize: 13,
             fontFamily: '"JetBrains Mono", "Fira Code", monospace',

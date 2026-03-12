@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { QueryTab } from "../../models/queryTab";
-import { getDefaultSqlForDialect, SqlDialect } from "../../utils/sql";
+import { SqlDialect } from "../../utils/sql";
 
 function createTabTitle(index: number): string {
   return `SQLQuery${index}`;
@@ -10,6 +10,7 @@ interface UseWorkspaceSqlSessionArgs {
   sql: string;
   setSql: (sql: string) => void;
   activeDialect: SqlDialect;
+  buildDefaultSql: () => Promise<string>;
   tabs: QueryTab[];
   activeTabId: string;
   setActiveTabId: (id: string) => void;
@@ -23,6 +24,7 @@ export function useWorkspaceSqlSession({
   sql,
   setSql,
   activeDialect,
+  buildDefaultSql,
   tabs,
   activeTabId,
   setActiveTabId,
@@ -61,8 +63,11 @@ export function useWorkspaceSqlSession({
   };
 
   const createNewTab = () => {
-    const id = addTab(createTabTitle(tabs.length + 1), getDefaultSqlForDialect(activeDialect));
-    setActiveTabId(id);
+    void (async () => {
+      const initialSql = await buildDefaultSql();
+      const id = addTab(createTabTitle(tabs.length + 1), initialSql);
+      setActiveTabId(id);
+    })();
   };
 
   const closeTabById = (id: string) => {

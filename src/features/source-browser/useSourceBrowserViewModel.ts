@@ -4,7 +4,7 @@ import { DatabaseType } from "../../models/database";
 import { useDatasetActions, useDatasetCollectionState, useDatasetMetadataState } from "../../state/datasetStore";
 import { useDatabaseActions, useDatabaseState } from "../../state/databaseStore";
 import { useQuerySqlStore } from "../../state/queryStore";
-import { buildSelectAll, buildSelectColumn } from "../../utils/sql";
+import { buildSelectAllSql, buildSelectColumnSql } from "../../services/sqlTemplateService";
 import { useSourceCatalog } from "../source-catalog";
 
 export function useSourceBrowserViewModel() {
@@ -25,6 +25,7 @@ export function useSourceBrowserViewModel() {
     connections,
     selectedConnectionId,
     tablesByConnection,
+    schemaTreeByConnection,
     isLoading: isDbLoading,
     isLoadingTables,
     error: dbError,
@@ -39,7 +40,6 @@ export function useSourceBrowserViewModel() {
   } = useDatabaseActions();
 
   const {
-    activeSource,
     sources,
     datasetSources,
     databaseSources,
@@ -89,9 +89,19 @@ export function useSourceBrowserViewModel() {
     setAddingConnection(false);
   };
 
-  const handleTableQuery = (tableName: string) => {
-    const dialect = activeSource?.kind === "database" ? activeSource.dialect : "sqlite";
-    setSql(buildSelectAll(tableName, 100, dialect));
+  const handleTableQuery = async (tableName: string) => {
+    const sql = await buildSelectAllSql(tableName, selectedConnectionId, 100);
+    setSql(sql);
+  };
+
+  const handleDatasetQuery = async (tableName: string) => {
+    const sql = await buildSelectAllSql(tableName, null, 100);
+    setSql(sql);
+  };
+
+  const handleDatasetColumnQuery = async (tableName: string, columnName: string) => {
+    const sql = await buildSelectColumnSql(tableName, columnName, null, 100);
+    setSql(sql);
   };
 
   const handleDatasetSelect = (id: string) => {
@@ -177,6 +187,7 @@ export function useSourceBrowserViewModel() {
     databaseSources,
     selectedConnectionId,
     tablesByConnection,
+    schemaTreeByConnection,
     isDbLoading,
     isLoadingTables,
     dbError,
@@ -198,6 +209,8 @@ export function useSourceBrowserViewModel() {
     handleImport,
     handleConnectDatabase,
     handleTableQuery,
+    handleDatasetQuery,
+    handleDatasetColumnQuery,
     handleDatasetSelect,
     handleConnectionSelect,
     toggleConnectionExpanded,
@@ -206,7 +219,5 @@ export function useSourceBrowserViewModel() {
     removeDataset,
     disconnectDatabase,
     refreshTables,
-    buildSelectAll,
-    buildSelectColumn,
   };
 }

@@ -39,6 +39,7 @@ export function DatasetExplorer() {
     handleConnectDatabase,
     selectedConnectionId,
     tablesByConnection,
+    schemaTreeByConnection,
     isLoadingTables,
     handleConnectionSelect,
     toggleConnectionExpanded,
@@ -48,6 +49,8 @@ export function DatasetExplorer() {
     fetchStats,
     removeDataset,
     handleDatasetSelect,
+    handleDatasetQuery,
+    handleDatasetColumnQuery,
     canQuery,
     canStats,
     canQueryDataset,
@@ -56,8 +59,6 @@ export function DatasetExplorer() {
     canInspectTablesConnection,
     setSql,
     selectedDataset,
-    buildSelectAll,
-    buildSelectColumn,
   } = vm;
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -84,10 +85,10 @@ export function DatasetExplorer() {
             error={error}
             expandedIds={expandedDatasets}
             onSelect={handleDatasetSelect}
-            onQuery={name => setSql(buildSelectAll(name, 100, "datafusion"))}
+            onQuery={name => { void handleDatasetQuery(name); }}
             onStats={id => fetchStats(id)}
             onRemove={id => removeDataset(id)}
-            onColumnQuery={(table, col) => setSql(buildSelectColumn(table, col, 100, "datafusion"))}
+            onColumnQuery={(table, col) => { void handleDatasetColumnQuery(table, col); }}
             onImport={handleImport}
             canQueryDataset={canQueryDataset}
             canStatsDataset={canStatsDataset}
@@ -138,13 +139,14 @@ export function DatasetExplorer() {
             connections={connections}
             selectedConnectionId={selectedConnectionId}
             tablesByConnection={tablesByConnection}
+            schemaTreeByConnection={schemaTreeByConnection}
             isLoadingTables={isLoadingTables}
             expandedIds={expandedConnections}
             onSelectConnection={handleConnectionSelect}
             onToggleExpanded={toggleConnectionExpanded}
             onRefreshTables={id => refreshTables(id)}
             onDisconnect={id => disconnectDatabase(id)}
-            onTableQuery={handleTableQuery}
+            onTableQuery={tableName => { void handleTableQuery(tableName); }}
             onAddConnection={() => { setAddingConnection(true); setConnectionsOpen(true); }}
             canQueryConnection={canQueryConnection}
             canInspectTablesConnection={canInspectTablesConnection}
@@ -181,7 +183,7 @@ export function DatasetExplorer() {
             <button
               onClick={() => {
                 if (!canQuery) return;
-                setSql(buildSelectAll(selectedDataset.name, 100, "datafusion"));
+                void handleDatasetQuery(selectedDataset.name);
               }}
               disabled={!canQuery}
               className="btn-ghost text-xs py-0.5 px-2 gap-1"

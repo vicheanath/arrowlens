@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
-import { DatabaseConnectionInfo, DatabaseType } from "../models/database";
+import { DatabaseConnectionInfo, DatabaseSchemaEntry, DatabaseType } from "../models/database";
 import * as databaseService from "../services/databaseService";
 import { useToast } from "../utils/toast";
 import { errorToMessage } from "../utils/errors";
@@ -9,6 +9,7 @@ interface DatabaseState {
   connections: DatabaseConnectionInfo[];
   selectedConnectionId: string | null;
   tablesByConnection: Record<string, string[]>;
+  schemaTreeByConnection: Record<string, DatabaseSchemaEntry[]>;
   isLoading: boolean;
   isLoadingTables: boolean;
   error: string | null;
@@ -30,6 +31,7 @@ interface DatabaseConnectionsState {
   connections: DatabaseConnectionInfo[];
   selectedConnectionId: string | null;
   tablesByConnection: Record<string, string[]>;
+  schemaTreeByConnection: Record<string, DatabaseSchemaEntry[]>;
   isLoading: boolean;
   isLoadingTables: boolean;
   error: string | null;
@@ -59,6 +61,7 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     null,
   );
   const [tablesByConnection, setTablesByConnection] = useState<Record<string, string[]>>({});
+  const [schemaTreeByConnection, setSchemaTreeByConnection] = useState<Record<string, DatabaseSchemaEntry[]>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingTables, setIsLoadingTables] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +73,14 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     setIsLoadingTables(true);
     setError(null);
     try {
-      const tables = await databaseService.listDatabaseTables(targetId);
+      const schemaTree = await databaseService.listDatabaseSchemaTree(targetId);
+      const tables = schemaTree.flatMap((schema) =>
+        schema.tables.map((table) => (schema.name === "main" ? table.name : table.full_name)),
+      );
+      setSchemaTreeByConnection((current) => ({
+        ...current,
+        [targetId]: schemaTree,
+      }));
       setTablesByConnection((current) => ({
         ...current,
         [targetId]: tables,
@@ -142,6 +152,10 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
         const { [id]: _removed, ...rest } = current;
         return rest;
       });
+      setSchemaTreeByConnection((current) => {
+        const { [id]: _removed, ...rest } = current;
+        return rest;
+      });
       success("Database disconnected", undefined, 3000);
     } catch (e) {
       const errorMessage = errorToMessage(e);
@@ -164,11 +178,12 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
       connections,
       selectedConnectionId,
       tablesByConnection,
+      schemaTreeByConnection,
       isLoading,
       isLoadingTables,
       error,
     }),
-    [connections, selectedConnectionId, tablesByConnection, isLoading, isLoadingTables, error],
+    [connections, selectedConnectionId, tablesByConnection, schemaTreeByConnection, isLoading, isLoadingTables, error],
   );
 
   const actionsValue = useMemo(

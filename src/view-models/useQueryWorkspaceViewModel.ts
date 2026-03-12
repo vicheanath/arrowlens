@@ -9,7 +9,8 @@ import {
   useSavedQueriesStore,
 } from "../state/queryStore";
 import { useResultTabState } from "../state/uiStore";
-import { buildSelectAll, formatSql } from "../utils/sql";
+import { buildSelectAll, formatSql, getDefaultSqlForDialect } from "../utils/sql";
+import { buildCountSql, buildSelectAllSql, buildWorkspaceDefaultSql } from "../services/sqlTemplateService";
 import { useSourceCatalog } from "../features/source-catalog";
 import { useWorkspaceSession } from "../features/workspace-session";
 import { useQueryExecutionShortcuts, useWorkspaceSqlSession } from "../features/query-workspace";
@@ -28,7 +29,6 @@ export function useQueryWorkspaceViewModel() {
     activeSourceLabel,
     completionSchema,
     selectedConnectionId,
-    sourceRecommendations,
     canQuery,
     canStream,
     canExplain,
@@ -43,6 +43,23 @@ export function useQueryWorkspaceViewModel() {
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [filterText, setFilterText] = useState("");
+  const [defaultSqlTemplate, setDefaultSqlTemplate] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    void buildWorkspaceDefaultSql(selectedConnectionId)
+      .then((nextTemplate) => {
+        if (isMounted) setDefaultSqlTemplate(nextTemplate);
+      })
+      .catch(() => {
+        if (isMounted) setDefaultSqlTemplate(getDefaultSqlForDialect(activeDialect));
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeDialect, selectedConnectionId]);
 
   const {
     activeTab,
@@ -54,6 +71,7 @@ export function useQueryWorkspaceViewModel() {
     sql,
     setSql,
     activeDialect,
+    buildDefaultSql: () => buildWorkspaceDefaultSql(selectedConnectionId),
     tabs,
     activeTabId,
     setActiveTabId,
@@ -110,6 +128,16 @@ export function useQueryWorkspaceViewModel() {
     onEditorSqlChange(`${prefix}${snippet}`);
   };
 
+  const insertSelectTemplate = async () => {
+    const snippet = await buildSelectAllSql("table_name", selectedConnectionId, 100);
+    appendTemplate(snippet);
+  };
+
+  const insertCountTemplate = async () => {
+    const snippet = await buildCountSql("table_name", selectedConnectionId);
+    appendTemplate(snippet);
+  };
+
   return {
     sql,
     isRunning,
@@ -135,12 +163,12 @@ export function useQueryWorkspaceViewModel() {
     displayRows,
     displayColumns,
     displayTypes,
-    sourceRecommendations,
     canQuery,
     canStream,
     canExplain,
     completionSchema,
     dialectConfig,
+    defaultSqlTemplate,
     tableAreaHeight,
     hasCompletedResult,
     containerRef,
@@ -160,6 +188,8 @@ export function useQueryWorkspaceViewModel() {
     runWithSelectionFallback,
     onEditorSqlChange,
     appendTemplate,
+    insertSelectTemplate,
+    insertCountTemplate,
     formatSql,
     buildSelectAll,
     onExplain: () => {

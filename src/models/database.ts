@@ -10,6 +10,17 @@ export interface DatabaseConnectionInfo {
   created_at: string;
 }
 
+export interface DatabaseTableEntry {
+  schema: string;
+  name: string;
+  full_name: string;
+}
+
+export interface DatabaseSchemaEntry {
+  name: string;
+  tables: DatabaseTableEntry[];
+}
+
 export interface RunDatabaseQueryParams {
   connectionId: string;
   sql: string;

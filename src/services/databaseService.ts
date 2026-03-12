@@ -2,6 +2,7 @@ import { invokeCommand } from "./tauriService";
 import {
   ConnectDatabaseParams,
   DatabaseConnectionInfo,
+  DatabaseSchemaEntry,
 } from "../models/database";
 
 export function connectDatabase(
@@ -35,6 +36,12 @@ export function disconnectDatabase(id: string): Promise<boolean> {
 
 export function listDatabaseTables(connectionId: string): Promise<string[]> {
   return invokeCommand<string[]>("list_database_tables", {
+    connectionId,
+  });
+}
+
+export function listDatabaseSchemaTree(connectionId: string): Promise<DatabaseSchemaEntry[]> {
+  return invokeCommand<DatabaseSchemaEntry[]>("list_database_schema_tree", {
     connectionId,
   });
 }

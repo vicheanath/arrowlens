@@ -21,6 +21,19 @@ pub struct DatabaseExecutor {
     info: DatabaseConnectionInfo,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DatabaseTableEntry {
+    pub schema: String,
+    pub name: String,
+    pub full_name: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DatabaseSchemaEntry {
+    pub name: String,
+    pub tables: Vec<DatabaseTableEntry>,
+}
+
 impl DatabaseExecutor {
     pub fn new(
         registry: Arc<DatabaseRegistry>,
@@ -41,26 +54,29 @@ impl DatabaseExecutor {
         self.registry.get_or_create_pool(&self.connection_id).await
     }
 
-    pub async fn list_tables(&self) -> Result<Vec<String>> {
+    pub async fn list_schema_tree(&self) -> Result<Vec<DatabaseSchemaEntry>> {
         let pool = self.get_pool().await?;
 
         let sql = match self.info.database_type {
             DatabaseType::Sqlite => {
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                "SELECT 'main' AS schema_name, name AS table_name \
+                 FROM sqlite_master \
+                 WHERE type='table' AND name NOT LIKE 'sqlite_%' \
+                 ORDER BY name"
             }
             DatabaseType::Mysql => {
-                                "SELECT CONCAT(table_schema, '.', table_name) AS name \
-                                 FROM information_schema.tables \
-                                 WHERE table_schema = DATABASE() \
-                                     AND table_type IN ('BASE TABLE', 'VIEW') \
-                                 ORDER BY table_schema, table_name"
+                "SELECT table_schema AS schema_name, table_name \
+                 FROM information_schema.tables \
+                 WHERE table_schema = DATABASE() \
+                     AND table_type IN ('BASE TABLE', 'VIEW') \
+                 ORDER BY table_schema, table_name"
             }
             DatabaseType::Postgres => {
-                                "SELECT table_schema || '.' || table_name AS name \
-                                 FROM information_schema.tables \
-                                 WHERE table_schema NOT IN ('pg_catalog', 'information_schema') \
-                                     AND table_type IN ('BASE TABLE', 'VIEW', 'FOREIGN') \
-                                 ORDER BY table_schema, table_name"
+                "SELECT table_schema AS schema_name, table_name \
+                 FROM information_schema.tables \
+                 WHERE table_schema NOT IN ('pg_catalog', 'information_schema') \
+                     AND table_type IN ('BASE TABLE', 'VIEW', 'FOREIGN') \
+                 ORDER BY table_schema, table_name"
             }
         };
 
@@ -69,12 +85,49 @@ impl DatabaseExecutor {
             .await
             .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
 
-        let mut tables = Vec::with_capacity(rows.len());
+        let mut schemas: Vec<DatabaseSchemaEntry> = Vec::new();
+
         for row in rows {
-            let name = row
+            let schema_name = row
                 .try_get::<String, _>(0)
                 .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
-            tables.push(name);
+            let table_name = row
+                .try_get::<String, _>(1)
+                .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
+
+            let schema_index = schemas
+                .iter()
+                .position(|schema| schema.name == schema_name)
+                .unwrap_or_else(|| {
+                    schemas.push(DatabaseSchemaEntry {
+                        name: schema_name.clone(),
+                        tables: Vec::new(),
+                    });
+                    schemas.len() - 1
+                });
+
+            schemas[schema_index].tables.push(DatabaseTableEntry {
+                schema: schema_name.clone(),
+                name: table_name.clone(),
+                full_name: format!("{}.{}", schema_name, table_name),
+            });
+        }
+
+        Ok(schemas)
+    }
+
+    pub async fn list_tables(&self) -> Result<Vec<String>> {
+        let schemas = self.list_schema_tree().await?;
+        let mut tables = Vec::new();
+
+        for schema in schemas {
+            for table in schema.tables {
+                if self.info.database_type == DatabaseType::Sqlite {
+                    tables.push(table.name);
+                } else {
+                    tables.push(table.full_name);
+                }
+            }
         }
 
         Ok(tables)
