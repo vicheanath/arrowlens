@@ -7,6 +7,7 @@ import { cn } from "../utils/formatters";
 import { VirtualTable } from "../components/VirtualTable";
 import { ChartBuilder } from "../components/ChartBuilder";
 import { ExportModal } from "../components/ExportModal";
+import { ExplainPanel } from "../components/query/ExplainPanel";
 import { QueryEditorTabs } from "../components/query/QueryEditorTabs";
 import { QueryToolbar } from "../components/query/QueryToolbar";
 import { getDefaultSqlForDialect, getDialectLabel } from "../utils/sql";
@@ -62,7 +63,7 @@ export function QueryWorkspace() {
         onCancel={vm.cancelQuery}
         onExplain={vm.onExplain}
         onExport={() => vm.setShowExportModal(true)}
-        onFormat={() => vm.onEditorSqlChange(vm.formatSql(vm.activeTab?.sql ?? ""))}
+        onFormat={() => vm.onEditorSqlChange(vm.formatSql(vm.activeTabSql ?? ""))}
         onInsertSelectTemplate={() => vm.appendTemplate("SELECT *\nFROM \"table_name\"\nLIMIT 100;")}
         onInsertCountTemplate={() => vm.appendTemplate("SELECT COUNT(*) AS total\nFROM \"table_name\";")}
       />
@@ -88,7 +89,7 @@ export function QueryWorkspace() {
 
       <div className="flex-shrink-0" style={{ height: 220 }}>
         <CodeMirror
-          value={vm.activeTab?.sql ?? vm.sql}
+          value={vm.activeTabSql ?? vm.sql}
           onCreateEditor={(view) => {
             vm.editorViewRef.current = view;
           }}
@@ -227,11 +228,11 @@ export function QueryWorkspace() {
               />
             )}
             {vm.resultTab === "explain" && vm.explainPlan && (
-              <div className="h-full overflow-auto p-4">
-                <pre className="text-xs font-mono text-text-secondary whitespace-pre-wrap leading-5">
-                  {vm.explainPlan}
-                </pre>
-              </div>
+              <ExplainPanel
+                explainPlan={vm.explainPlan}
+                isExplaining={vm.isExplaining}
+                onRerun={vm.onExplainRerun}
+              />
             )}
           </div>
         </div>
@@ -247,7 +248,7 @@ export function QueryWorkspace() {
 
       {vm.showExportModal && (
         <ExportModal
-          sql={vm.activeTab?.sql ?? vm.sql}
+          sql={vm.activeTabSql ?? vm.sql}
           rowCount={vm.isStreaming ? vm.streaming.rows.length : vm.result?.row_count ?? 0}
           onClose={() => vm.setShowExportModal(false)}
         />

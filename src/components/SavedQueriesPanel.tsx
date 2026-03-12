@@ -1,10 +1,11 @@
 import React, { useState } from "react";
 import { Bookmark, Trash2, Play, Tag, Search } from "lucide-react";
-import { useQueryStore } from "../state/queryStore";
+import { useQuerySqlStore, useSavedQueriesStore } from "../state/queryStore";
 import { formatDate, cn } from "../utils/formatters";
 
 export function SavedQueriesPanel() {
-  const { savedQueries, removeSavedQuery, loadFromHistory, setSql } = useQueryStore();
+  const { savedQueries, removeSavedQuery } = useSavedQueriesStore();
+  const { setSql } = useQuerySqlStore();
   const [search, setSearch] = useState("");
 
   const filtered = savedQueries.filter(

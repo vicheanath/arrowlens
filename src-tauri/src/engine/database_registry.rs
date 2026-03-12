@@ -71,6 +71,15 @@ impl DatabaseRegistry {
         v
     }
 
+    pub fn restore_connections_list(&self, connections: Vec<DatabaseConnectionInfo>) {
+        let mut lock = self.connections.write();
+        lock.clear();
+
+        for conn in connections {
+            lock.insert(conn.id.clone(), conn);
+        }
+    }
+
     /// Remove the connection metadata (use `close_pool` first to free DB connections).
     pub fn remove(&self, id: &str) -> bool {
         self.connections.write().remove(id).is_some()

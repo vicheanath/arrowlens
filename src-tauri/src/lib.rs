@@ -10,9 +10,11 @@ pub mod state;
 pub mod streaming;
 
 use api::{database_api, dataset_api, export_api, query_api, stats_api};
+use cache::app_store::AppStore;
 use engine::database_registry::DatabaseRegistry;
 use engine::dataset_registry::DatasetRegistry;
 use cache::metadata_cache::MetadataCache;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -23,12 +25,34 @@ pub fn run() {
 
     let registry = Arc::new(DatasetRegistry::new());
     let db_registry = Arc::new(DatabaseRegistry::new());
+    let db_registry_for_setup = db_registry.clone();
     let cache = Arc::new(MetadataCache::new());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        .setup(move |app| {
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| -> Box<dyn std::error::Error> {
+                    Box::new(std::io::Error::other(format!(
+                        "Failed to resolve app data dir: {e}"
+                    )))
+                })?;
+
+            let app_store = Arc::new(AppStore::initialize(&app_data_dir).map_err(
+                |e| -> Box<dyn std::error::Error> { Box::new(e) },
+            )?);
+
+            query_api::restore_history(app_store.load_query_history());
+            db_registry_for_setup
+                .restore_connections_list(app_store.load_database_connections());
+
+            app.manage(app_store);
+            Ok(())
+        })
         .manage(registry)
         .manage(db_registry)
         .manage(cache)

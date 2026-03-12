@@ -9,8 +9,10 @@ import {
   X,
   BarChart2,
 } from "lucide-react";
-import { useUiStore, useQueryStore, useDatasetStore } from "../state/store";
-import { useDatabaseStore } from "../state/databaseStore";
+import { useCommandPaletteState } from "../state/uiStore";
+import { useDatasetActions, useDatasetCollectionState } from "../state/datasetStore";
+import { useDatabaseState } from "../state/databaseStore";
+import { useQueryExecutionActions, useQueryHistoryStore, useQuerySqlStore } from "../state/queryStore";
 import { cn } from "../utils/formatters";
 
 interface CommandPaletteProps {
@@ -18,10 +20,13 @@ interface CommandPaletteProps {
 }
 
 export function CommandPalette({ onImportDataset }: CommandPaletteProps) {
-  const { isCommandPaletteOpen, closeCommandPalette } = useUiStore();
-  const { runQuery, history, setSql } = useQueryStore();
-  const { datasets, selectDataset } = useDatasetStore();
-  const { selectedConnectionId } = useDatabaseStore();
+  const { isCommandPaletteOpen, closeCommandPalette } = useCommandPaletteState();
+  const { runQuery } = useQueryExecutionActions();
+  const { history } = useQueryHistoryStore();
+  const { setSql } = useQuerySqlStore();
+  const { datasets } = useDatasetCollectionState();
+  const { selectDataset } = useDatasetActions();
+  const { selectedConnectionId } = useDatabaseState();
 
   useEffect(() => {
     if (!isCommandPaletteOpen) return;

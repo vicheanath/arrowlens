@@ -1,8 +1,8 @@
 import { useMemo } from "react";
-import { useQueryStore } from "../state/queryStore";
+import { useQueryHistoryStore } from "../state/queryStore";
 
 export function useQueryHistoryViewModel() {
-  const { history, loadFromHistory } = useQueryStore();
+  const { history, loadFromHistory } = useQueryHistoryStore();
   return useMemo(
     () => ({ history, loadFromHistory, isEmpty: history.length === 0 }),
     [history, loadFromHistory],

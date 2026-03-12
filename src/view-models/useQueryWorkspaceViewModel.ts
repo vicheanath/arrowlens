@@ -1,42 +1,50 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EditorView } from "@uiw/react-codemirror";
 import { StandardSQL, SQLite, MySQL, PostgreSQL } from "@codemirror/lang-sql";
-import { useQueryStore } from "../state/queryStore";
-import { useUiStore } from "../state/uiStore";
-import { useDatabaseStore } from "../state/databaseStore";
-import { useDatasetStore } from "../state/datasetStore";
+import {
+  useQueryExecutionActions,
+  useQueryExecutionState,
+  useQueryHistoryStore,
+  useQuerySqlStore,
+  useSavedQueriesStore,
+} from "../state/queryStore";
+import { useResultTabState } from "../state/uiStore";
+import { useDatabaseState } from "../state/databaseStore";
+import { useDatasetCollectionState, useDatasetMetadataState } from "../state/datasetStore";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { buildSelectAll, formatSql, getDefaultSqlForDialect, sanitizeSqlIdentifier, SqlDialect } from "../utils/sql";
-import { useQueryTabsContext } from "../context/QueryTabsContext";
+import { useQueryTabsMeta, useQueryTabsSql } from "../context/QueryTabsContext";
 
 function createTabTitle(index: number): string {
   return `SQLQuery${index}`;
 }
 
-export function useQueryWorkspaceViewModel() {
-  const {
-    sql,
-    setSql,
-    isRunning,
-    result,
-    error,
-    streaming,
-    isStreaming,
-    runQuery,
-    runStreamingQuery,
-    cancelQuery,
-    loadHistory,
-    clearError,
-    saveQuery,
-    explainPlan,
-    isExplaining,
-    runExplain,
-  } = useQueryStore();
+function parseDatasetColumnsFromSchemaJson(schemaJson: string | null | undefined): string[] {
+  if (!schemaJson) return [];
+  try {
+    const parsed = JSON.parse(schemaJson) as Array<{ name?: string }>;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((field) => field?.name)
+      .filter((name): name is string => typeof name === "string" && name.length > 0);
+  } catch {
+    return [];
+  }
+}
 
-  const { resultTab, setResultTab } = useUiStore();
-  const { connections, selectedConnectionId, tablesByConnection } = useDatabaseStore();
-  const { datasets, selectedId, schema } = useDatasetStore();
-  const { tabs, activeTabId, setActiveTabId, updateTabSql, addTab, closeTab } = useQueryTabsContext();
+export function useQueryWorkspaceViewModel() {
+  const { sql, setSql } = useQuerySqlStore();
+  const { isRunning, result, error, streaming, isStreaming, explainPlan, isExplaining } = useQueryExecutionState();
+  const { runQuery, runStreamingQuery, cancelQuery, clearError, runExplain } = useQueryExecutionActions();
+  const { loadHistory } = useQueryHistoryStore();
+  const { saveQuery } = useSavedQueriesStore();
+
+  const { resultTab, setResultTab } = useResultTabState();
+  const { connections, selectedConnectionId, tablesByConnection } = useDatabaseState();
+  const { datasets, selectedId } = useDatasetCollectionState();
+  const { schema } = useDatasetMetadataState();
+  const { tabs, activeTabId, setActiveTabId, addTab, closeTab } = useQueryTabsMeta();
+  const { updateTabSql, getTabSql } = useQueryTabsSql();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
@@ -56,12 +64,13 @@ export function useQueryWorkspaceViewModel() {
     () => tabs.find((tab) => tab.id === activeTabId) ?? tabs[0],
     [activeTabId, tabs],
   );
+  const activeTabSql = activeTab ? getTabSql(activeTab.id) : "";
 
   useEffect(() => {
-    if (tabs.length === 1 && !tabs[0].sql) {
+    if (tabs.length === 1 && !getTabSql(tabs[0].id)) {
       updateTabSql(tabs[0].id, sql);
     }
-  }, []);
+  }, [getTabSql, sql, tabs, updateTabSql]);
 
   useEffect(() => {
     loadHistory();
@@ -78,14 +87,14 @@ export function useQueryWorkspaceViewModel() {
   }, []);
 
   useEffect(() => {
-    if (activeTab) setSql(activeTab.sql);
-  }, [activeTab?.id]);
+    if (activeTab) setSql(getTabSql(activeTab.id));
+  }, [activeTab?.id, getTabSql, setSql]);
 
   useEffect(() => {
-    if (activeTab && activeTab.sql !== sql) {
+    if (activeTab && getTabSql(activeTab.id) !== sql) {
       updateTabSql(activeTab.id, sql);
     }
-  }, [activeTab, sql, updateTabSql]);
+  }, [activeTab, getTabSql, sql, updateTabSql]);
 
   const onEditorSqlChange = (nextSql: string) => {
     if (!activeTab) return;
@@ -103,7 +112,7 @@ export function useQueryWorkspaceViewModel() {
     closeTab(id);
     if (closingActive) {
       const fallback = tabs.find((t) => t.id !== id);
-      if (fallback) setSql(fallback.sql);
+      if (fallback) setSql(getTabSql(fallback.id));
     }
   };
 
@@ -118,7 +127,7 @@ export function useQueryWorkspaceViewModel() {
 
   const runWithSelectionFallback = (streamingMode: boolean) => {
     const selectedSql = getSelectedSql();
-    const queryText = selectedSql ?? activeTab?.sql ?? sql;
+    const queryText = selectedSql ?? activeTabSql ?? sql;
     if (streamingMode) runStreamingQuery(selectedConnectionId, queryText);
     else runQuery(selectedConnectionId, queryText);
   };
@@ -167,8 +176,21 @@ export function useQueryWorkspaceViewModel() {
       return completion;
     }
 
-    for (const dataset of datasets) completion[sanitizeSqlIdentifier(dataset.name)] = [];
-    if (selectedDataset && schema?.fields?.length) completion[sanitizeSqlIdentifier(selectedDataset.name)] = schema.fields.map((f) => f.name);
+    for (const dataset of datasets) {
+      const key = sanitizeSqlIdentifier(dataset.name);
+      const parsedColumns = parseDatasetColumnsFromSchemaJson(dataset.schema_json);
+      completion[key] = parsedColumns;
+    }
+
+    // Fallback to selected-dataset schema API response when schema_json is missing or empty.
+    if (selectedDataset && schema?.fields?.length) {
+      const key = sanitizeSqlIdentifier(selectedDataset.name);
+      const existing = completion[key];
+      if (!Array.isArray(existing) || existing.length === 0) {
+        completion[key] = schema.fields.map((f) => f.name);
+      }
+    }
+
     return completion;
   }, [datasets, schema?.fields, selectedConnectionId, selectedDataset, tablesByConnection]);
 
@@ -178,7 +200,7 @@ export function useQueryWorkspaceViewModel() {
   }, [datasets, selectedConnectionId, tablesByConnection]);
 
   const appendTemplate = (snippet: string) => {
-    const currentSql = activeTab?.sql ?? "";
+    const currentSql = activeTabSql;
     const prefix = currentSql.trim().length > 0 ? `${currentSql.trimEnd()}\n\n` : "";
     onEditorSqlChange(`${prefix}${snippet}`);
   };
@@ -202,6 +224,7 @@ export function useQueryWorkspaceViewModel() {
     tabs,
     activeTabId,
     activeTab,
+    activeTabSql,
     showExportModal,
     showSaveInput,
     saveName,
@@ -236,7 +259,12 @@ export function useQueryWorkspaceViewModel() {
     buildSelectAll,
     onExplain: () => {
       const selectedSql = getSelectedSql();
-      runExplain(false, selectedSql ?? activeTab?.sql ?? sql);
+      runExplain(false, selectedSql ?? activeTabSql ?? sql);
+      setResultTab("explain");
+    },
+    onExplainRerun: (verbose: boolean) => {
+      const selectedSql = getSelectedSql();
+      runExplain(verbose, selectedSql ?? activeTabSql ?? sql);
       setResultTab("explain");
     },
   };

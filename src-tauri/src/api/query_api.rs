@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
+use crate::cache::app_store::AppStore;
 use crate::engine::database_registry::DatabaseRegistry;
 use crate::engine::dataset_registry::DatasetRegistry;
 use crate::engine::query_executor::{ExecutionTarget, ExecutorFactory};
@@ -10,7 +11,7 @@ use crate::error::{AppError, Result};
 use crate::state::active_queries;
 use crate::streaming::result_serializer::QueryResult;
 
-/// Query history stored in-process (reset on restart).
+/// Query history stored in-process and restored from persisted app state.
 static HISTORY: once_cell::sync::Lazy<parking_lot::Mutex<Vec<HistoryEntry>>> =
     once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(Vec::new()));
 
@@ -24,6 +25,15 @@ pub struct HistoryEntry {
     pub error: Option<String>,
 }
 
+pub fn restore_history(entries: Vec<HistoryEntry>) {
+    let mut lock = HISTORY.lock();
+    *lock = entries;
+    if lock.len() > 200 {
+        let overflow = lock.len() - 200;
+        lock.drain(0..overflow);
+    }
+}
+
 /// Execute a SQL query and return all results at once.
 /// If `connection_id` is provided, routes to an external DB; otherwise uses DataFusion on loaded datasets.
 #[tauri::command]
@@ -32,6 +42,7 @@ pub async fn run_query(
     connection_id: Option<String>,
     registry: State<'_, Arc<DatasetRegistry>>,
     db_registry: State<'_, Arc<DatabaseRegistry>>,
+    app_store: State<'_, Arc<AppStore>>,
 ) -> Result<QueryResult> {
     if sql.trim().is_empty() {
         return Err(AppError::QuerySyntaxError("Query cannot be empty".to_string()));
@@ -51,7 +62,13 @@ pub async fn run_query(
     let executor = factory.resolve(target)?;
     let result = executor.execute(&sql).await?;
 
-    record_history(&sql, Some(result.elapsed_ms), Some(result.row_count), None);
+    record_history(
+        &sql,
+        Some(result.elapsed_ms),
+        Some(result.row_count),
+        None,
+        app_store.inner().as_ref(),
+    );
 
     Ok(result)
 }
@@ -67,6 +84,7 @@ pub async fn run_query_streaming(
     app: AppHandle,
     registry: State<'_, Arc<DatasetRegistry>>,
     db_registry: State<'_, Arc<DatabaseRegistry>>,
+    app_store: State<'_, Arc<AppStore>>,
 ) -> Result<String> {
     if sql.trim().is_empty() {
         return Err(AppError::QuerySyntaxError("Query cannot be empty".to_string()));
@@ -140,7 +158,7 @@ pub async fn run_query_streaming(
         active_queries::cleanup(&qid_cleanup);
     });
 
-    record_history(&sql, None, None, None);
+    record_history(&sql, None, None, None, app_store.inner().as_ref());
     Ok(query_id)
 }
 
@@ -162,10 +180,13 @@ pub async fn get_query_history() -> Result<Vec<HistoryEntry>> {
 }
 
 /// Run EXPLAIN on a SQL query and return the query plan as a string.
+/// If `connection_id` is provided, routes to an external DB (e.g. PostgreSQL);
+/// otherwise uses DataFusion on loaded datasets.
 #[tauri::command]
 pub async fn explain_query(
     sql: String,
     verbose: Option<bool>,
+    connection_id: Option<String>,
     registry: State<'_, Arc<DatasetRegistry>>,
     db_registry: State<'_, Arc<DatabaseRegistry>>,
 ) -> Result<String> {
@@ -173,14 +194,31 @@ pub async fn explain_query(
         return Err(AppError::QuerySyntaxError("Query cannot be empty".to_string()));
     }
 
-    let factory = ExecutorFactory::new(registry.inner().clone(), db_registry.inner().clone());
-    let executor = factory.resolve(ExecutionTarget::Datasets)?;
     let verbose = verbose.unwrap_or(false);
-    let explain_sql = if verbose {
-        format!("EXPLAIN VERBOSE {}", sql)
-    } else {
-        format!("EXPLAIN {}", sql)
+    let factory = ExecutorFactory::new(registry.inner().clone(), db_registry.inner().clone());
+
+    let (target, explain_sql) = match connection_id {
+        Some(id) => {
+            // PostgreSQL / external DB: use EXPLAIN ANALYZE for verbose, plain EXPLAIN otherwise.
+            let esql = if verbose {
+                format!("EXPLAIN ANALYZE {}", sql)
+            } else {
+                format!("EXPLAIN {}", sql)
+            };
+            (ExecutionTarget::Database { connection_id: id }, esql)
+        }
+        None => {
+            // DataFusion supports EXPLAIN VERBOSE
+            let esql = if verbose {
+                format!("EXPLAIN VERBOSE {}", sql)
+            } else {
+                format!("EXPLAIN {}", sql)
+            };
+            (ExecutionTarget::Datasets, esql)
+        }
     };
+
+    let executor = factory.resolve(target)?;
 
     let result = executor.execute(&explain_sql)
         .await
@@ -208,6 +246,7 @@ fn record_history(
     elapsed_ms: Option<u64>,
     row_count: Option<usize>,
     error: Option<String>,
+    app_store: &AppStore,
 ) {
     let entry = HistoryEntry {
         id: Uuid::new_v4().to_string(),
@@ -217,10 +256,17 @@ fn record_history(
         row_count,
         error,
     };
-    let mut lock = HISTORY.lock();
-    lock.push(entry);
-    // Keep at most 200 entries
-    if lock.len() > 200 {
-        lock.remove(0);
+    let snapshot = {
+        let mut lock = HISTORY.lock();
+        lock.push(entry);
+        // Keep at most 200 entries
+        if lock.len() > 200 {
+            lock.remove(0);
+        }
+        lock.clone()
+    };
+
+    if let Err(e) = app_store.save_query_history(&snapshot) {
+        log::error!("Failed to persist query history: {}", e);
     }
 }

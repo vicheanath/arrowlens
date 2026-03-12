@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tauri::State;
 
+use crate::cache::app_store::AppStore;
 use crate::engine::database_executor::DatabaseExecutor;
 use crate::engine::database_registry::{DatabaseConnectionInfo, DatabaseRegistry, DatabaseType};
 use crate::error::Result;
@@ -12,6 +13,7 @@ pub async fn connect_database(
     connection_string: String,
     name: Option<String>,
     registry: State<'_, Arc<DatabaseRegistry>>,
+    app_store: State<'_, Arc<AppStore>>,
 ) -> Result<DatabaseConnectionInfo> {
     let normalized = normalize_connection_string(&database_type, &connection_string);
     DatabaseExecutor::validate_connection_string(&normalized).await?;
@@ -19,7 +21,12 @@ pub async fn connect_database(
     let resolved_name = name.unwrap_or_else(|| default_connection_name(&database_type, &normalized));
     let info = DatabaseConnectionInfo::new(resolved_name, database_type, normalized);
     let id = registry.register(info.clone());
-    Ok(registry.get(&id).unwrap_or(info))
+    let resolved = registry.get(&id).unwrap_or(info);
+
+    app_store
+        .save_database_connections(&registry.list())?;
+
+    Ok(resolved)
 }
 
 #[tauri::command]
@@ -27,8 +34,9 @@ pub async fn connect_sqlite_database(
     path: String,
     name: Option<String>,
     registry: State<'_, Arc<DatabaseRegistry>>,
+    app_store: State<'_, Arc<AppStore>>,
 ) -> Result<DatabaseConnectionInfo> {
-    connect_database(DatabaseType::Sqlite, path, name, registry).await
+    connect_database(DatabaseType::Sqlite, path, name, registry, app_store).await
 }
 
 #[tauri::command]
@@ -42,9 +50,15 @@ pub async fn list_database_connections(
 pub async fn disconnect_database(
     id: String,
     registry: State<'_, Arc<DatabaseRegistry>>,
+    app_store: State<'_, Arc<AppStore>>,
 ) -> Result<bool> {
     registry.close_pool(&id).await;
-    Ok(registry.remove(&id))
+    let removed = registry.remove(&id);
+
+    app_store
+        .save_database_connections(&registry.list())?;
+
+    Ok(removed)
 }
 
 #[tauri::command]

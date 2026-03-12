@@ -1,26 +1,10 @@
-import React, { useMemo, useState } from "react";
-import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  ScatterChart,
-  Scatter,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
+import React, { useEffect, useMemo, useState } from "react";
 import { cn } from "../utils/formatters";
 import { isRightAligned } from "../utils/dataTypes";
-import { cellToString } from "../utils/formatters";
-
-type ChartType = "bar" | "line" | "scatter" | "pie";
+import { ChartCanvas } from "./chart/ChartCanvas";
+import { ChartControls } from "./chart/ChartControls";
+import { AggregateMode, ChartType, SortMode } from "./chart/chartTypes";
+import { aggregateData, limitData, mapRowsToData, sortData } from "./chart/chartUtils";
 
 interface ChartBuilderProps {
   columns: string[];
@@ -29,18 +13,8 @@ interface ChartBuilderProps {
   className?: string;
 }
 
-const CHART_COLORS = [
-  "#89b4fa",
-  "#a6e3a1",
-  "#f9e2af",
-  "#f38ba8",
-  "#94e2d5",
-  "#cba6f7",
-  "#fab387",
-  "#89dceb",
-];
-
 const MAX_CHART_ROWS = 2000;
+const MAX_PIE_SLICES = 12;
 
 export function ChartBuilder({
   columns,
@@ -49,135 +23,86 @@ export function ChartBuilder({
   className,
 }: ChartBuilderProps) {
   const [chartType, setChartType] = useState<ChartType>("bar");
-  const [xAxis, setXAxis] = useState<string>(columns[0] ?? "");
+  const [aggregateMode, setAggregateMode] = useState<AggregateMode>("sum");
+  const [sortMode, setSortMode] = useState<SortMode>("valueDesc");
+  const [topN, setTopN] = useState<number | "all">(100);
+
+  const allCols = columns;
+  const numericCols = useMemo(
+    () => columns.filter((_, i) => isRightAligned(columnTypes[i] ?? "")),
+    [columns, columnTypes],
+  );
+  const yAxisOptions = numericCols.length > 0 ? numericCols : allCols;
+
+  const [xAxis, setXAxis] = useState<string>(allCols[0] ?? "");
   const [yAxis, setYAxis] = useState<string>(
-    columns.find((_, i) => isRightAligned(columnTypes[i] ?? "")) ?? columns[1] ?? ""
+    yAxisOptions[0] ?? allCols[1] ?? allCols[0] ?? "",
   );
 
-  const chartData = useMemo(() => {
-    const xIdx = columns.indexOf(xAxis);
-    const yIdx = columns.indexOf(yAxis);
-    if (xIdx === -1 || yIdx === -1) return [];
-
-    return rows.slice(0, MAX_CHART_ROWS).map((row) => ({
-      x: cellToString(row[xIdx]),
-      y: Number(row[yIdx]) || 0,
-    }));
-  }, [rows, columns, xAxis, yAxis]);
-
-  const numericCols = columns.filter((_, i) => isRightAligned(columnTypes[i] ?? ""));
-  const allCols = columns;
-
-  const renderChart = () => {
-    const commonProps = {
-      data: chartData,
-      margin: { top: 8, right: 16, bottom: 8, left: 0 },
-    };
-    const axisProps = {
-      stroke: "#6c7086",
-      tick: { fill: "#a6adc8", fontSize: 11 },
-      axisLine: { stroke: "#2a2a3d" },
-      tickLine: false,
-    };
-
-    switch (chartType) {
-      case "bar":
-        return (
-          <BarChart {...commonProps}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
-            <XAxis dataKey="x" {...axisProps} />
-            <YAxis {...axisProps} />
-            <Tooltip
-              contentStyle={{
-                background: "#181826",
-                border: "1px solid #2a2a3d",
-                borderRadius: 6,
-                color: "#cdd6f4",
-                fontSize: 12,
-              }}
-            />
-            <Bar dataKey="y" fill={CHART_COLORS[0]} radius={[2, 2, 0, 0]} />
-          </BarChart>
-        );
-
-      case "line":
-        return (
-          <LineChart {...commonProps}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
-            <XAxis dataKey="x" {...axisProps} />
-            <YAxis {...axisProps} />
-            <Tooltip
-              contentStyle={{
-                background: "#181826",
-                border: "1px solid #2a2a3d",
-                borderRadius: 6,
-                color: "#cdd6f4",
-                fontSize: 12,
-              }}
-            />
-            <Line
-              type="monotone"
-              dataKey="y"
-              stroke={CHART_COLORS[0]}
-              dot={chartData.length < 100}
-              strokeWidth={2}
-            />
-          </LineChart>
-        );
-
-      case "scatter":
-        return (
-          <ScatterChart {...commonProps}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
-            <XAxis dataKey="x" {...axisProps} />
-            <YAxis dataKey="y" {...axisProps} />
-            <Tooltip
-              contentStyle={{
-                background: "#181826",
-                border: "1px solid #2a2a3d",
-                borderRadius: 6,
-                color: "#cdd6f4",
-                fontSize: 12,
-              }}
-            />
-            <Scatter data={chartData} fill={CHART_COLORS[0]} />
-          </ScatterChart>
-        );
-
-      case "pie":
-        return (
-          <PieChart>
-            <Pie
-              data={chartData}
-              dataKey="y"
-              nameKey="x"
-              cx="50%"
-              cy="50%"
-              outerRadius="70%"
-              label={({ name, percent }) =>
-                `${name}: ${(percent * 100).toFixed(1)}%`
-              }
-              labelLine={{ stroke: "#6c7086" }}
-            >
-              {chartData.map((_, index) => (
-                <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip
-              contentStyle={{
-                background: "#181826",
-                border: "1px solid #2a2a3d",
-                borderRadius: 6,
-                color: "#cdd6f4",
-                fontSize: 12,
-              }}
-            />
-          </PieChart>
-        );
+  useEffect(() => {
+    if (chartType === "scatter" && aggregateMode !== "none") {
+      setAggregateMode("none");
     }
+  }, [aggregateMode, chartType]);
+
+  useEffect(() => {
+    const nextX = allCols[0] ?? "";
+    if (!allCols.includes(xAxis)) {
+      setXAxis(nextX);
+    }
+  }, [allCols, xAxis]);
+
+  useEffect(() => {
+    const nextY = yAxisOptions[0] ?? allCols[1] ?? allCols[0] ?? "";
+    if (!yAxisOptions.includes(yAxis)) {
+      setYAxis(nextY);
+    }
+  }, [allCols, yAxis, yAxisOptions]);
+
+  const rawData = useMemo(() => {
+    const xIdx = allCols.indexOf(xAxis);
+    const yIdx = allCols.indexOf(yAxis);
+    if (xIdx === -1 || yIdx === -1) return [];
+    return mapRowsToData(rows, xIdx, yIdx, MAX_CHART_ROWS);
+  }, [rows, allCols, xAxis, yAxis]);
+
+  const computedData = useMemo(() => {
+    const maybeAggregated = chartType === "scatter" ? rawData : aggregateData(rawData, aggregateMode);
+    const sorted = sortData(maybeAggregated, sortMode);
+    return limitData(sorted, topN);
+  }, [aggregateMode, chartType, rawData, sortMode, topN]);
+
+  const pieData = useMemo(() => {
+    if (computedData.length <= MAX_PIE_SLICES) return computedData;
+    const sorted = [...computedData].sort((a, b) => b.y - a.y);
+    const top = sorted.slice(0, MAX_PIE_SLICES - 1);
+    const otherTotal = sorted.slice(MAX_PIE_SLICES - 1).reduce((sum, item) => sum + item.y, 0);
+    return [...top, { x: "Other", y: otherTotal }];
+  }, [computedData]);
+
+  const hasAxisChoices = allCols.length > 0 && yAxisOptions.length > 0;
+  const hasRenderableData = computedData.length > 0;
+
+  const onReset = () => {
+    const defaultX = allCols[0] ?? "";
+    const defaultY = yAxisOptions[0] ?? allCols[1] ?? allCols[0] ?? "";
+    setXAxis(defaultX);
+    setYAxis(defaultY);
+    setChartType("bar");
+    setAggregateMode("sum");
+    setSortMode("valueDesc");
+    setTopN(100);
   };
 
-  if (!columns.length || !rows.length) {
+  const onSwapAxes = () => {
+    if (!xAxis || !yAxis) return;
+    if (!allCols.includes(yAxis)) return;
+    if (!yAxisOptions.includes(xAxis)) return;
+    setXAxis(yAxis);
+    setYAxis(xAxis);
+  };
+
+  if (!allCols.length || !rows.length) {
     return (
       <div className={cn("flex items-center justify-center text-text-muted text-sm", className)}>
         Run a query to visualize results
@@ -185,71 +110,39 @@ export function ChartBuilder({
     );
   }
 
+  if (!hasAxisChoices) {
+    return (
+      <div className={cn("flex items-center justify-center text-text-muted text-sm", className)}>
+        No columns available for charting
+      </div>
+    );
+  }
+
   return (
     <div className={cn("flex flex-col gap-2", className)}>
-      {/* Controls */}
-      <div className="flex items-center gap-3 flex-wrap px-2 py-2 border-b border-border">
-        {/* Chart type */}
-        <div className="flex items-center gap-1">
-          {(["bar", "line", "scatter", "pie"] as ChartType[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setChartType(t)}
-              className={cn(
-                "btn text-xs capitalize",
-                chartType === t
-                  ? "bg-accent-blue/20 text-accent-blue"
-                  : "btn-ghost"
-              )}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
+      <ChartControls
+        chartType={chartType}
+        setChartType={setChartType}
+        xAxis={xAxis}
+        yAxis={yAxis}
+        allCols={allCols}
+        yAxisOptions={yAxisOptions}
+        onChangeXAxis={setXAxis}
+        onChangeYAxis={setYAxis}
+        aggregateMode={aggregateMode}
+        setAggregateMode={setAggregateMode}
+        sortMode={sortMode}
+        setSortMode={setSortMode}
+        topN={topN}
+        setTopN={setTopN}
+        onSwapAxes={onSwapAxes}
+        onReset={onReset}
+        pointsCount={computedData.length}
+        maxInputPoints={Math.min(rows.length, MAX_CHART_ROWS)}
+        hasRenderableData={hasRenderableData}
+      />
 
-        <div className="h-4 w-px bg-border" />
-
-        {/* X Axis */}
-        <label className="flex items-center gap-1.5 text-xs text-text-muted">
-          X
-          <select
-            value={xAxis}
-            onChange={(e) => setXAxis(e.target.value)}
-            className="input text-xs py-0.5"
-          >
-            {allCols.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-        </label>
-
-        {/* Y Axis */}
-        {chartType !== "pie" && (
-          <label className="flex items-center gap-1.5 text-xs text-text-muted">
-            Y
-            <select
-              value={yAxis}
-              onChange={(e) => setYAxis(e.target.value)}
-              className="input text-xs py-0.5"
-            >
-              {(numericCols.length > 0 ? numericCols : allCols).map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          </label>
-        )}
-
-        <span className="text-xs text-text-muted ml-auto">
-          {Math.min(rows.length, MAX_CHART_ROWS).toLocaleString()} points
-        </span>
-      </div>
-
-      {/* Chart */}
-      <div className="flex-1 min-h-0">
-        <ResponsiveContainer width="100%" height="100%">
-          {renderChart() as React.ReactElement}
-        </ResponsiveContainer>
-      </div>
+      <ChartCanvas chartType={chartType} data={computedData} pieData={pieData} />
     </div>
   );
 }

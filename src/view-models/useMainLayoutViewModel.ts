@@ -1,12 +1,13 @@
 import { useCallback } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useUiStore } from "../state/uiStore";
-import { useDatasetStore } from "../state/datasetStore";
+import { useCommandPaletteState, useSidebarState } from "../state/uiStore";
+import { useDatasetActions } from "../state/datasetStore";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 
 export function useMainLayoutViewModel() {
-  const { isSidebarOpen, sidebarSection, setSidebarSection, toggleSidebar, openCommandPalette } = useUiStore();
-  const { importDataset } = useDatasetStore();
+  const { isSidebarOpen, sidebarSection, setSidebarSection, toggleSidebar } = useSidebarState();
+  const { openCommandPalette } = useCommandPaletteState();
+  const { importDataset } = useDatasetActions();
 
   useKeyboardShortcuts([
     { key: "k", meta: true, handler: () => openCommandPalette() },

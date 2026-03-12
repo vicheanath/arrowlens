@@ -22,7 +22,20 @@ interface DebugState {
   clearLastError: () => void;
 }
 
-const DebugContext = createContext<DebugState | null>(null);
+interface DebugModeState {
+  debugMode: boolean;
+  setDebugMode: (value: boolean) => void;
+  toggleDebugMode: () => void;
+}
+
+interface DebugErrorState {
+  lastError: DebugErrorEntry | null;
+  recordError: (entry: DebugErrorEntry) => void;
+  clearLastError: () => void;
+}
+
+const DebugModeContext = createContext<DebugModeState | null>(null);
+const DebugErrorContext = createContext<DebugErrorState | null>(null);
 
 let debugRecorder: ((entry: DebugErrorEntry) => void) | null = null;
 
@@ -43,25 +56,57 @@ export function DebugProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const value = useMemo(
+  const modeValue = useMemo(
     () => ({
       debugMode,
-      lastError,
       setDebugMode,
       toggleDebugMode: () => setDebugMode((current) => !current),
+    }),
+    [debugMode, setDebugMode],
+  );
+
+  const errorValue = useMemo(
+    () => ({
+      lastError,
       recordError: (entry: DebugErrorEntry) => setLastError(entry),
       clearLastError: () => setLastError(null),
     }),
-    [debugMode, lastError, setDebugMode],
+    [lastError],
   );
 
-  return React.createElement(DebugContext.Provider, { value }, children);
+  return React.createElement(
+    DebugModeContext.Provider,
+    { value: modeValue },
+    React.createElement(DebugErrorContext.Provider, { value: errorValue }, children),
+  );
 }
 
-export function useDebugStore() {
-  const context = useContext(DebugContext);
-  if (!context) {
-    throw new Error("useDebugStore must be used within DebugProvider");
+function useRequiredDebugContext<T>(context: React.Context<T | null>, name: string): T {
+  const value = useContext(context);
+  if (!value) {
+    throw new Error(`${name} must be used within DebugProvider`);
   }
-  return context;
+  return value;
+}
+
+export function useDebugModeState() {
+  return useRequiredDebugContext(DebugModeContext, "useDebugModeState");
+}
+
+export function useDebugErrorState() {
+  return useRequiredDebugContext(DebugErrorContext, "useDebugErrorState");
+}
+
+export function useDebugStore(): DebugState {
+  const { debugMode, setDebugMode, toggleDebugMode } = useDebugModeState();
+  const { lastError, recordError, clearLastError } = useDebugErrorState();
+
+  return {
+    debugMode,
+    lastError,
+    setDebugMode,
+    toggleDebugMode,
+    recordError,
+    clearLastError,
+  };
 }

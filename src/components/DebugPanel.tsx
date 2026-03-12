@@ -1,9 +1,10 @@
 import React from "react";
 import { Bug, Trash2, X } from "lucide-react";
-import { useDebugStore } from "../state/debugStore";
+import { useDebugErrorState, useDebugModeState } from "../state/debugStore";
 
 export function DebugPanel() {
-  const { debugMode, lastError, clearLastError, setDebugMode } = useDebugStore();
+  const { debugMode, setDebugMode } = useDebugModeState();
+  const { lastError, clearLastError } = useDebugErrorState();
 
   if (!debugMode) {
     return null;

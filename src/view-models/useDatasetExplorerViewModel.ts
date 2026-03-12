@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { DatabaseType } from "../models/database";
-import { useDatasetStore } from "../state/datasetStore";
-import { useDatabaseStore } from "../state/databaseStore";
-import { useQueryStore } from "../state/queryStore";
+import { useDatasetActions, useDatasetCollectionState, useDatasetMetadataState } from "../state/datasetStore";
+import { useDatabaseActions, useDatabaseState } from "../state/databaseStore";
+import { useQuerySqlStore } from "../state/queryStore";
 import { buildSelectAll, buildSelectColumn } from "../utils/sql";
 
 export function useDatasetExplorerViewModel() {
@@ -16,20 +16,20 @@ export function useDatasetExplorerViewModel() {
   const [expandedDatasets, setExpandedDatasets] = useState<Set<string>>(new Set());
   const [expandedConnections, setExpandedConnections] = useState<Set<string>>(new Set());
 
-  const {
-    datasets, selectedId, schema,
-    isLoading, error,
-    loadDatasets, importDataset, removeDataset, selectDataset, fetchStats,
-  } = useDatasetStore();
+  const { datasets, selectedId, isLoading, error } = useDatasetCollectionState();
+  const { schema } = useDatasetMetadataState();
+  const { loadDatasets, importDataset, removeDataset, selectDataset, fetchStats } = useDatasetActions();
 
   const {
     connections, selectedConnectionId, tablesByConnection,
     isLoading: isDbLoading, isLoadingTables, error: dbError,
+  } = useDatabaseState();
+  const {
     loadConnections, connectDatabase, connectSqliteDatabase,
     disconnectDatabase, selectConnection, refreshTables,
-  } = useDatabaseStore();
+  } = useDatabaseActions();
 
-  const { setSql } = useQueryStore();
+  const { setSql } = useQuerySqlStore();
 
   useEffect(() => {
     loadDatasets();
@@ -75,8 +75,10 @@ export function useDatasetExplorerViewModel() {
   };
 
   const handleDatasetSelect = (id: string) => {
-    selectDataset(id === selectedId ? null : id);
-    if (id !== selectedId) selectConnection(null);
+    if (id !== selectedId) {
+      selectDataset(id);
+      selectConnection(null);
+    }
     setExpandedDatasets((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);

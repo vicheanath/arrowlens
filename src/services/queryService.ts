@@ -29,6 +29,6 @@ export function getQueryHistory(): Promise<HistoryEntry[]> {
   return invokeCommand<HistoryEntry[]>("get_query_history");
 }
 
-export function explainQuery(sql: string, verbose?: boolean): Promise<string> {
-  return invokeCommand<string>("explain_query", { sql, verbose: verbose ?? false });
+export function explainQuery(sql: string, verbose?: boolean, connectionId?: string | null): Promise<string> {
+  return invokeCommand<string>("explain_query", { sql, verbose: verbose ?? false, connectionId: connectionId ?? null });
 }

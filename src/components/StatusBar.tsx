@@ -1,18 +1,19 @@
 import React from "react";
 import { Database, Zap, AlertCircle, Bug } from "lucide-react";
-import { useQueryStore } from "../state/queryStore";
-import { useDatasetStore } from "../state/datasetStore";
-import { useDatabaseStore } from "../state/databaseStore";
-import { useDebugStore } from "../state/debugStore";
+import { useQueryExecutionState } from "../state/queryStore";
+import { useDatasetCollectionState } from "../state/datasetStore";
+import { useDatabaseState } from "../state/databaseStore";
+import { useDebugErrorState, useDebugModeState } from "../state/debugStore";
 import { formatDuration, formatNumber } from "../utils/formatters";
 import { getDialectLabel } from "../utils/sql";
 import { cn } from "../utils/formatters";
 
 export function StatusBar() {
-  const { isRunning, result, error, streaming, isStreaming } = useQueryStore();
-  const { datasets, selectedId } = useDatasetStore();
-  const { connections, selectedConnectionId } = useDatabaseStore();
-  const { debugMode, toggleDebugMode, lastError } = useDebugStore();
+  const { isRunning, result, error, streaming, isStreaming } = useQueryExecutionState();
+  const { datasets, selectedId } = useDatasetCollectionState();
+  const { connections, selectedConnectionId } = useDatabaseState();
+  const { debugMode, toggleDebugMode } = useDebugModeState();
+  const { lastError } = useDebugErrorState();
   const selectedDataset = datasets.find((d) => d.id === selectedId);
   const selectedConnection = connections.find((c) => c.id === selectedConnectionId);
   const activeDialect = selectedConnection?.database_type ?? "datafusion";

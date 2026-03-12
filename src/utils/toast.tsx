@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle, Info, AlertTriangle } from "lucide-react";
 
 export type ToastType = "success" | "error" | "info" | "warning";
@@ -24,11 +24,11 @@ const ToastContext = createContext<ToastStore | null>(null);
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const removeToast = (id: string) => {
+  const removeToast = useCallback((id: string) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
-  };
+  }, []);
 
-  const addToast = (toast: Omit<Toast, "id">) => {
+  const addToast = useCallback((toast: Omit<Toast, "id">) => {
     const id = crypto.randomUUID();
     setToasts((current) => [...current, { ...toast, id }]);
 
@@ -37,16 +37,18 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         setToasts((current) => current.filter((item) => item.id !== id));
       }, toast.duration);
     }
-  };
+  }, []);
+
+  const clearAll = useCallback(() => setToasts([]), []);
 
   const value = useMemo(
     () => ({
       toasts,
       addToast,
       removeToast,
-      clearAll: () => setToasts([]),
+      clearAll,
     }),
-    [toasts],
+    [toasts, addToast, removeToast, clearAll],
   );
 
   return <ToastContext.Provider value={value}>{children}</ToastContext.Provider>;
@@ -63,7 +65,7 @@ export function useToastStore() {
 export function useToast() {
   const { addToast } = useToastStore();
 
-  return {
+  return useMemo(() => ({
     success: (message: string, title?: string, duration = 5000) => {
       addToast({ type: "success", message, title, duration });
     },
@@ -76,7 +78,7 @@ export function useToast() {
     info: (message: string, title?: string, duration = 5000) => {
       addToast({ type: "info", message, title, duration });
     },
-  };
+  }), [addToast]);
 }
 
 export function ToastContainer() {
