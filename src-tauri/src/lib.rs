@@ -17,6 +17,9 @@ use cache::metadata_cache::MetadataCache;
 pub fn run() {
     env_logger::init();
 
+    // Register SQLx drivers for the `any` pool (SQLite, MySQL, Postgres)
+    sqlx::any::install_default_drivers();
+
     let registry = Arc::new(DatasetRegistry::new());
     let db_registry = Arc::new(DatabaseRegistry::new());
     let cache = Arc::new(MetadataCache::new());
@@ -34,8 +37,6 @@ pub fn run() {
             database_api::list_database_connections,
             database_api::disconnect_database,
             database_api::list_database_tables,
-            database_api::run_database_query,
-            database_api::run_database_query_streaming,
             dataset_api::load_dataset,
             dataset_api::list_datasets,
             dataset_api::remove_dataset,

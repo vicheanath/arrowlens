@@ -1,8 +1,8 @@
 import { invokeCommand } from "./tauriService";
 import { HistoryEntry, QueryResult } from "../models/query";
 
-export function runQuery(sql: string): Promise<QueryResult> {
-  return invokeCommand<QueryResult>("run_query", { sql });
+export function runQuery(sql: string, connectionId?: string | null): Promise<QueryResult> {
+  return invokeCommand<QueryResult>("run_query", { sql, connectionId: connectionId ?? null });
 }
 
 /**
@@ -11,10 +11,12 @@ export function runQuery(sql: string): Promise<QueryResult> {
  */
 export function runStreamingQuery(
   sql: string,
-  chunkSize?: number
+  chunkSize?: number,
+  connectionId?: string | null
 ): Promise<string> {
   return invokeCommand<string>("run_query_streaming", {
     sql,
+    connectionId: connectionId ?? null,
     chunkSize: chunkSize ?? null,
   });
 }

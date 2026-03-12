@@ -2,15 +2,14 @@ import { invokeCommand } from "./tauriService";
 import {
   ConnectDatabaseParams,
   DatabaseConnectionInfo,
-  DatabaseQueryResult,
 } from "../models/database";
 
 export function connectDatabase(
   params: ConnectDatabaseParams,
 ): Promise<DatabaseConnectionInfo> {
   return invokeCommand<DatabaseConnectionInfo>("connect_database", {
-    database_type: params.databaseType,
-    connection_string: params.connectionString,
+    databaseType: params.databaseType,
+    connectionString: params.connectionString,
     name: params.name ?? null,
   });
 }
@@ -36,30 +35,6 @@ export function disconnectDatabase(id: string): Promise<boolean> {
 
 export function listDatabaseTables(connectionId: string): Promise<string[]> {
   return invokeCommand<string[]>("list_database_tables", {
-    connection_id: connectionId,
-  });
-}
-
-export function runDatabaseQuery(
-  connectionId: string,
-  sql: string,
-  limit?: number,
-): Promise<DatabaseQueryResult> {
-  return invokeCommand<DatabaseQueryResult>("run_database_query", {
-    connection_id: connectionId,
-    sql,
-    limit: limit ?? null,
-  });
-}
-
-export function runDatabaseQueryStreaming(
-  connectionId: string,
-  sql: string,
-  chunkSize?: number,
-): Promise<string> {
-  return invokeCommand<string>("run_database_query_streaming", {
-    connection_id: connectionId,
-    sql,
-    chunk_size: chunkSize ?? null,
+    connectionId,
   });
 }

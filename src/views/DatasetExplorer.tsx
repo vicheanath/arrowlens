@@ -156,7 +156,11 @@ export function DatasetExplorer() {
             datasets={datasets}
             schemas={schemaMap}
             selectedId={selectedId}
-            onSelect={selectDataset}
+            onSelect={(id) => {
+              selectDataset(id);
+              // Activating a dataset switches the query backend to DataFusion.
+              if (id) selectConnection(null);
+            }}
             onColumnClick={(table, col) => setSql(buildSelectColumn(table, col, 100, "datafusion"))}
           />
         )}

@@ -3,11 +3,11 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
+use crate::engine::database_registry::DatabaseRegistry;
 use crate::engine::dataset_registry::DatasetRegistry;
-use crate::engine::query_engine::QueryEngine;
+use crate::engine::query_executor::{ExecutionTarget, ExecutorFactory};
 use crate::error::{AppError, Result};
 use crate::state::active_queries;
-use crate::streaming::record_batch_stream::stream_to_frontend;
 use crate::streaming::result_serializer::QueryResult;
 
 /// Query history stored in-process (reset on restart).
@@ -25,17 +25,31 @@ pub struct HistoryEntry {
 }
 
 /// Execute a SQL query and return all results at once.
+/// If `connection_id` is provided, routes to an external DB; otherwise uses DataFusion on loaded datasets.
 #[tauri::command]
 pub async fn run_query(
     sql: String,
+    connection_id: Option<String>,
     registry: State<'_, Arc<DatasetRegistry>>,
+    db_registry: State<'_, Arc<DatabaseRegistry>>,
 ) -> Result<QueryResult> {
     if sql.trim().is_empty() {
         return Err(AppError::QuerySyntaxError("Query cannot be empty".to_string()));
     }
 
-    let engine = QueryEngine::new(registry.inner().clone());
-    let result = engine.execute_query(&sql).await?;
+    let target = match connection_id {
+        Some(id) => {
+            log::info!("[Query Execute] backend=database connection_id={}", id);
+            ExecutionTarget::Database { connection_id: id }
+        }
+        None => {
+            log::info!("[Query Execute] backend=datafusion");
+            ExecutionTarget::Datasets
+        }
+    };
+    let factory = ExecutorFactory::new(registry.inner().clone(), db_registry.inner().clone());
+    let executor = factory.resolve(target)?;
+    let result = executor.execute(&sql).await?;
 
     record_history(&sql, Some(result.elapsed_ms), Some(result.row_count), None);
 
@@ -43,13 +57,16 @@ pub async fn run_query(
 }
 
 /// Execute a SQL query and stream results back as Tauri events.
+/// If `connection_id` is provided, routes to an external DB; otherwise uses DataFusion on loaded datasets.
 /// Returns the query_id immediately; frontend listens for `query-chunk-{query_id}`.
 #[tauri::command]
 pub async fn run_query_streaming(
     sql: String,
+    connection_id: Option<String>,
     chunk_size: Option<usize>,
     app: AppHandle,
     registry: State<'_, Arc<DatasetRegistry>>,
+    db_registry: State<'_, Arc<DatabaseRegistry>>,
 ) -> Result<String> {
     if sql.trim().is_empty() {
         return Err(AppError::QuerySyntaxError("Query cannot be empty".to_string()));
@@ -58,16 +75,39 @@ pub async fn run_query_streaming(
     let query_id = Uuid::new_v4().to_string();
     let chunk_size = chunk_size.unwrap_or(500);
     let registry_clone = registry.inner().clone();
+    let db_registry_clone = db_registry.inner().clone();
     let app_clone = app.clone();
     let qid = query_id.clone();
     let sql_clone = sql.clone();
+    let target = match connection_id {
+        Some(id) => {
+            log::info!("[Streaming Query Execute] backend=database connection_id={}", id);
+            ExecutionTarget::Database { connection_id: id }
+        }
+        None => {
+            log::info!("[Streaming Query Execute] backend=datafusion");
+            ExecutionTarget::Datasets
+        }
+    };
 
     // Register the query
     active_queries::register_query(&qid);
     let qid_cleanup = qid.clone();
 
     tokio::spawn(async move {
-        let engine = QueryEngine::new(registry_clone);
+        let factory = ExecutorFactory::new(registry_clone, db_registry_clone);
+        let executor = match factory.resolve(target) {
+            Ok(executor) => executor,
+            Err(e) => {
+                let _ = tauri::Emitter::emit(
+                    &app_clone,
+                    &format!("query-error-{}", qid),
+                    e.to_response(Some(sql_clone.clone())),
+                );
+                active_queries::cleanup(&qid_cleanup);
+                return;
+            }
+        };
 
         // Check if cancelled before starting
         if active_queries::is_cancelled(&qid) {
@@ -80,29 +120,12 @@ pub async fn run_query_streaming(
             return;
         }
 
-        match engine.execute_streaming(&sql_clone).await {
-            Ok(df) => {
-                match df.execute_stream().await {
-                    Ok(stream) => {
-                        if let Err(e) = stream_to_frontend(app_clone.clone(), qid.clone(), stream, chunk_size).await {
-                            let _ = tauri::Emitter::emit(
-                                &app_clone,
-                                &format!("query-error-{}", qid),
-                                e.to_response(Some(sql_clone.clone())),
-                            );
-                        } else {
-                            active_queries::complete(&qid);
-                        }
-                    }
-                    Err(e) => {
-                        let app_err = AppError::QueryError(e.to_string());
-                        let _ = tauri::Emitter::emit(
-                            &app_clone,
-                            &format!("query-error-{}", qid),
-                            app_err.to_response(Some(sql_clone.clone())),
-                        );
-                    }
-                }
+        match executor
+            .execute_streaming(app_clone.clone(), qid.clone(), &sql_clone, chunk_size)
+            .await
+        {
+            Ok(_) => {
+                active_queries::complete(&qid);
             }
             Err(e) => {
                 let _ = tauri::Emitter::emit(
@@ -144,12 +167,14 @@ pub async fn explain_query(
     sql: String,
     verbose: Option<bool>,
     registry: State<'_, Arc<DatasetRegistry>>,
+    db_registry: State<'_, Arc<DatabaseRegistry>>,
 ) -> Result<String> {
     if sql.trim().is_empty() {
         return Err(AppError::QuerySyntaxError("Query cannot be empty".to_string()));
     }
 
-    let engine = QueryEngine::new(registry.inner().clone());
+    let factory = ExecutorFactory::new(registry.inner().clone(), db_registry.inner().clone());
+    let executor = factory.resolve(ExecutionTarget::Datasets)?;
     let verbose = verbose.unwrap_or(false);
     let explain_sql = if verbose {
         format!("EXPLAIN VERBOSE {}", sql)
@@ -157,7 +182,7 @@ pub async fn explain_query(
         format!("EXPLAIN {}", sql)
     };
 
-    let result = engine.execute_query(&explain_sql)
+    let result = executor.execute(&explain_sql)
         .await
         .map_err(|_| {
             // DataFusion EXPLAIN returns rows, not an error — this handles edge cases

@@ -2,7 +2,6 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { HistoryEntry, QueryResult, SavedQuery, StreamChunk } from "../models/query";
 import * as queryService from "../services/queryService";
-import * as databaseService from "../services/databaseService";
 import { listen } from "@tauri-apps/api/event";
 import { useDatabaseStore } from "./databaseStore";
 import { useToastStore } from "../utils/toast";
@@ -27,8 +26,8 @@ interface QueryState {
   isExplaining: boolean;
 
   setSql: (sql: string) => void;
-  runQuery: () => Promise<void>;
-  runStreamingQuery: () => Promise<void>;
+  runQuery: (connectionIdOverride?: string | null) => Promise<void>;
+  runStreamingQuery: (connectionIdOverride?: string | null) => Promise<void>;
   cancelQuery: () => void;
   loadHistory: () => Promise<void>;
   saveQuery: (name: string, tags?: string[]) => void;
@@ -57,7 +56,7 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
 
   setSql: (sql: string) => set({ sql }),
 
-  runQuery: async () => {
+  runQuery: async (connectionIdOverride = undefined) => {
     const { sql } = get();
     if (!sql.trim()) {
       useToastStore.getState().addToast({
@@ -69,10 +68,13 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
     }
     set({ isRunning: true, result: null, error: null, isStreaming: false });
     try {
-      const selectedConnectionId = useDatabaseStore.getState().selectedConnectionId;
-      const result = selectedConnectionId
-        ? await databaseService.runDatabaseQuery(selectedConnectionId, sql)
-        : await queryService.runQuery(sql);
+      const selectedConnectionId = connectionIdOverride ?? useDatabaseStore.getState().selectedConnectionId;
+      console.info("[Query Execute]", {
+        backend: selectedConnectionId ? "database" : "datafusion",
+        connectionId: selectedConnectionId ?? null,
+        sql,
+      });
+      const result = await queryService.runQuery(sql, selectedConnectionId);
       set({ result, isRunning: false });
       get().loadHistory();
     } catch (e) {
@@ -87,7 +89,7 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
     }
   },
 
-  runStreamingQuery: async () => {
+  runStreamingQuery: async (connectionIdOverride = undefined) => {
     const { sql } = get();
     if (!sql.trim()) {
       useToastStore.getState().addToast({
@@ -98,7 +100,12 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
       return;
     }
 
-    const selectedConnectionId = useDatabaseStore.getState().selectedConnectionId;
+    const selectedConnectionId = connectionIdOverride ?? useDatabaseStore.getState().selectedConnectionId;
+    console.info("[Streaming Query Execute]", {
+      backend: selectedConnectionId ? "database" : "datafusion",
+      connectionId: selectedConnectionId ?? null,
+      sql,
+    });
 
     set({
       isRunning: true,
@@ -109,21 +116,26 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
     });
 
     try {
-      // Use database streaming if connected, otherwise use dataset streaming
-      const queryId = selectedConnectionId
-        ? await databaseService.runDatabaseQueryStreaming(selectedConnectionId, sql)
-        : await queryService.runStreamingQuery(sql);
+      const queryId = await queryService.runStreamingQuery(sql, 500, selectedConnectionId);
 
       set((s) => ({ streaming: { ...s.streaming, queryId } }));
 
-      const unlistenChunk = await listen<StreamChunk>(
+      // Use a shared cleanup to prevent listener leaks on both success and error.
+      let unlistenChunk: (() => void) | null = null;
+      let unlistenError: (() => void) | null = null;
+      const cleanup = () => {
+        if (unlistenChunk) { unlistenChunk(); unlistenChunk = null; }
+        if (unlistenError) { unlistenError(); unlistenError = null; }
+      };
+
+      unlistenChunk = await listen<StreamChunk>(
         `query-chunk-${queryId}`,
         (event) => {
           const chunk = event.payload;
           if (chunk.done) {
             set({ isRunning: false });
             set((s) => ({ streaming: { ...s.streaming, isDone: true } }));
-            unlistenChunk();
+            cleanup();
           } else {
             set((s) => ({
               streaming: {
@@ -136,18 +148,18 @@ export const useQueryStore = create<QueryState>()(persist((set, get) => ({
         }
       );
 
-      const unlistenError = await listen<string>(
+      unlistenError = await listen<{ message: string }>(
         `query-error-${queryId}`,
         (event) => {
-          set({ error: event.payload, isRunning: false });
+          const msg = event.payload?.message ?? String(event.payload);
+          set({ error: msg, isRunning: false });
           useToastStore.getState().addToast({
             type: "error",
-            message: event.payload,
+            message: msg,
             title: "Streaming Query Error",
             duration: 7000,
           });
-          unlistenChunk();
-          unlistenError();
+          cleanup();
         }
       );
     } catch (e) {

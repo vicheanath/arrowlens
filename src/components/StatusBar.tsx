@@ -1,8 +1,9 @@
 import React from "react";
-import { Database, Zap, AlertCircle } from "lucide-react";
+import { Database, Zap, AlertCircle, Bug } from "lucide-react";
 import { useQueryStore } from "../state/queryStore";
 import { useDatasetStore } from "../state/datasetStore";
 import { useDatabaseStore } from "../state/databaseStore";
+import { useDebugStore } from "../state/debugStore";
 import { formatDuration, formatNumber } from "../utils/formatters";
 import { getDialectLabel } from "../utils/sql";
 import { cn } from "../utils/formatters";
@@ -11,6 +12,7 @@ export function StatusBar() {
   const { isRunning, result, error, streaming, isStreaming } = useQueryStore();
   const { datasets, selectedId } = useDatasetStore();
   const { connections, selectedConnectionId } = useDatabaseStore();
+  const { debugMode, toggleDebugMode, lastError } = useDebugStore();
   const selectedDataset = datasets.find((d) => d.id === selectedId);
   const selectedConnection = connections.find((c) => c.id === selectedConnectionId);
   const activeDialect = selectedConnection?.database_type ?? "datafusion";
@@ -60,7 +62,7 @@ export function StatusBar() {
           </div>
         )}
 
-        {rowCount > 0 && !isRunning && (
+        {result && !isRunning && (
           <span className="text-accent-green font-mono">
             {formatNumber(rowCount)} rows
             {elapsed !== null && ` · ${formatDuration(elapsed)}`}
@@ -70,6 +72,18 @@ export function StatusBar() {
 
       {/* Right section */}
       <div className="flex items-center gap-3 text-text-muted">
+        <button
+          onClick={toggleDebugMode}
+          className={cn(
+            "flex items-center gap-1 transition-colors",
+            debugMode ? "text-accent-peach" : "hover:text-text-secondary"
+          )}
+          title="Toggle debug mode"
+        >
+          <Bug size={11} />
+          <span>{debugMode ? "Debug On" : "Debug"}</span>
+          {debugMode && lastError && <span className="text-accent-red">*</span>}
+        </button>
         <span>{datasets.length} dataset{datasets.length !== 1 ? "s" : ""}</span>
         <span className="text-border">|</span>
         <span>ArrowLens v0.1.0</span>

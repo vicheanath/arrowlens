@@ -10,6 +10,7 @@ import {
   BarChart2,
 } from "lucide-react";
 import { useUiStore, useQueryStore, useDatasetStore } from "../state/store";
+import { useDatabaseStore } from "../state/databaseStore";
 import { cn } from "../utils/formatters";
 
 interface CommandPaletteProps {
@@ -20,6 +21,7 @@ export function CommandPalette({ onImportDataset }: CommandPaletteProps) {
   const { isCommandPaletteOpen, closeCommandPalette } = useUiStore();
   const { runQuery, history, setSql } = useQueryStore();
   const { datasets, selectDataset } = useDatasetStore();
+  const { selectedConnectionId } = useDatabaseStore();
 
   useEffect(() => {
     if (!isCommandPaletteOpen) return;
@@ -83,7 +85,7 @@ export function CommandPalette({ onImportDataset }: CommandPaletteProps) {
                 shortcut="⌘↵"
                 onSelect={() => {
                   closeCommandPalette();
-                  runQuery();
+                  runQuery(selectedConnectionId);
                 }}
               />
             </Command.Group>

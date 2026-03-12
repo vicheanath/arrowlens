@@ -1,5 +1,8 @@
+pub mod database_executor;
 pub mod database_registry;
+pub mod dataset_executor;
 pub mod dataset_registry;
+pub mod query_executor;
 pub mod query_engine;
 pub mod query_planner;
 pub mod schema_manager;

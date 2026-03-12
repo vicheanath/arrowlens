@@ -85,8 +85,8 @@ export function QueryWorkspace() {
   }, []);
 
   useKeyboardShortcuts([
-    { key: "Enter", meta: true, handler: () => runQuery() },
-    { key: "Enter", meta: true, shift: true, handler: () => runStreamingQuery() },
+    { key: "Enter", meta: true, handler: () => runQuery(selectedConnectionId) },
+    { key: "Enter", meta: true, shift: true, handler: () => runStreamingQuery(selectedConnectionId) },
   ]);
 
   const displayRows = isStreaming ? streaming.rows : (result?.rows ?? []);
@@ -117,13 +117,14 @@ export function QueryWorkspace() {
   ];
 
   const tableAreaHeight = Math.max(200, containerHeight - 280);
+  const hasCompletedResult = Boolean(result) || (isStreaming && streaming.isDone);
 
   return (
     <div ref={containerRef} className="flex flex-col h-full overflow-hidden">
       {/* Toolbar */}
       <div className="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border bg-surface-2">
         <button
-          onClick={runQuery}
+          onClick={() => runQuery(selectedConnectionId)}
           disabled={isRunning}
           className="btn-primary text-xs flex items-center gap-1.5"
           title="Run Query (⌘↵)"
@@ -133,7 +134,7 @@ export function QueryWorkspace() {
         </button>
 
         <button
-          onClick={runStreamingQuery}
+          onClick={() => runStreamingQuery(selectedConnectionId)}
           disabled={isRunning}
           className="btn-ghost text-xs flex items-center gap-1.5 text-accent-teal"
           title="Run Streaming (⌘⇧↵)"
@@ -274,7 +275,7 @@ export function QueryWorkspace() {
       )}
 
       {/* Results area */}
-      {(displayRows.length > 0 || isRunning || explainPlan) && (
+      {(hasCompletedResult || displayColumns.length > 0 || displayRows.length > 0 || isRunning || explainPlan) && (
         <div className="flex-1 flex flex-col min-h-0">
           {/* Result tabs + filter */}
           <div className="flex-shrink-0 flex items-center gap-0 border-b border-border bg-surface-1 px-2">
@@ -348,13 +349,19 @@ export function QueryWorkspace() {
           <div className="flex-1 overflow-hidden min-h-0">
             {resultTab === "table" && (
               <div className="overflow-x-auto h-full">
-                <VirtualTable
-                  columns={displayColumns}
-                  columnTypes={displayTypes}
-                  rows={filteredRows}
-                  height={tableAreaHeight}
-                  className="h-full"
-                />
+                {displayColumns.length > 0 ? (
+                  <VirtualTable
+                    columns={displayColumns}
+                    columnTypes={displayTypes}
+                    rows={filteredRows}
+                    height={tableAreaHeight}
+                    className="h-full"
+                  />
+                ) : (
+                  <div className="h-full flex items-center justify-center text-text-muted text-sm">
+                    Query completed with 0 rows returned.
+                  </div>
+                )}
               </div>
             )}
             {resultTab === "chart" && (
@@ -377,7 +384,7 @@ export function QueryWorkspace() {
       )}
 
       {/* Empty state */}
-      {!isRunning && displayRows.length === 0 && !error && !explainPlan && (
+      {!isRunning && !hasCompletedResult && displayRows.length === 0 && !error && !explainPlan && (
         <div className="flex-1 flex flex-col items-center justify-center text-text-muted gap-2">
           <Play size={32} className="opacity-20" />
           <p className="text-sm">Run a SQL query to see results</p>
