@@ -8,7 +8,7 @@ pub mod loaders;
 pub mod state;
 pub mod streaming;
 
-use api::{database_api, dataset_api, query_api, stats_api};
+use api::{database_api, dataset_api, export_api, query_api, stats_api};
 use engine::database_registry::DatabaseRegistry;
 use engine::dataset_registry::DatasetRegistry;
 use cache::metadata_cache::MetadataCache;
@@ -35,6 +35,7 @@ pub fn run() {
             database_api::disconnect_database,
             database_api::list_database_tables,
             database_api::run_database_query,
+            database_api::run_database_query_streaming,
             dataset_api::load_dataset,
             dataset_api::list_datasets,
             dataset_api::remove_dataset,
@@ -43,9 +44,11 @@ pub fn run() {
             query_api::run_query_streaming,
             query_api::cancel_query,
             query_api::get_query_history,
+            query_api::explain_query,
             stats_api::get_statistics,
             stats_api::get_schema,
             stats_api::get_column_stats,
+            export_api::export_query_results,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

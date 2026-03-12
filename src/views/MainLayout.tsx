@@ -9,12 +9,14 @@ import {
   Command,
   Menu,
   Upload,
+  Bookmark,
 } from "lucide-react";
 import { DatasetExplorer } from "./DatasetExplorer";
 import { QueryWorkspace } from "./QueryWorkspace";
 import { QueryHistoryView } from "./QueryHistoryView";
 import { StatusBar } from "../components/StatusBar";
 import { CommandPalette } from "../components/CommandPalette";
+import { SavedQueriesPanel } from "../components/SavedQueriesPanel";
 import { useUiStore, SidebarSection } from "../state/uiStore";
 import { useDatasetStore } from "../state/datasetStore";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
@@ -23,6 +25,7 @@ import { cn } from "../utils/formatters";
 const NAV_ITEMS: { id: SidebarSection; icon: React.ReactNode; label: string }[] = [
   { id: "datasets", icon: <Database size={18} />, label: "Datasets" },
   { id: "history", icon: <Clock size={18} />, label: "History" },
+  { id: "saved", icon: <Bookmark size={18} />, label: "Saved Queries" },
 ];
 
 export function MainLayout() {
@@ -140,6 +143,16 @@ export function MainLayout() {
                       <div className="flex-1 overflow-y-auto">
                         <QueryHistoryView />
                       </div>
+                    </div>
+                  )}
+                  {sidebarSection === "saved" && (
+                    <div className="flex flex-col h-full">
+                      <div className="px-3 py-2 border-b border-border flex-shrink-0">
+                        <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+                          Saved Queries
+                        </span>
+                      </div>
+                      <SavedQueriesPanel />
                     </div>
                   )}
                 </div>

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 export type ActiveTab = "explorer" | "query" | "chart" | "history";
-export type ResultTab = "table" | "chart";
+export type ResultTab = "table" | "chart" | "explain";
 export type SidebarSection = "datasets" | "history" | "saved";
 
 interface UiState {

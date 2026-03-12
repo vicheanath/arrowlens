@@ -19,6 +19,9 @@ import {
   BarChart2,
   Table,
   Database,
+  Download,
+  FileSearch,
+  Filter,
 } from "lucide-react";
 import { useQueryStore } from "../state/queryStore";
 import { useUiStore } from "../state/uiStore";
@@ -27,6 +30,7 @@ import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { formatDate, formatDuration, cn } from "../utils/formatters";
 import { VirtualTable } from "../components/VirtualTable";
 import { ChartBuilder } from "../components/ChartBuilder";
+import { ExportModal } from "../components/ExportModal";
 import { getDefaultSqlForDialect, getDialectLabel, SqlDialect } from "../utils/sql";
 
 export function QueryWorkspace() {
@@ -44,12 +48,20 @@ export function QueryWorkspace() {
     cancelQuery,
     loadHistory,
     clearError,
+    saveQuery,
+    explainPlan,
+    isExplaining,
+    runExplain,
   } = useQueryStore();
 
   const { resultTab, setResultTab } = useUiStore();
   const { connections, selectedConnectionId } = useDatabaseStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerHeight, setContainerHeight] = React.useState(400);
+  const [showExportModal, setShowExportModal] = React.useState(false);
+  const [showSaveInput, setShowSaveInput] = React.useState(false);
+  const [saveName, setSaveName] = React.useState("");
+  const [filterText, setFilterText] = React.useState("");
 
   const selectedConnection =
     connections.find((connection) => connection.id === selectedConnectionId) ?? null;
@@ -80,6 +92,15 @@ export function QueryWorkspace() {
   const displayRows = isStreaming ? streaming.rows : (result?.rows ?? []);
   const displayColumns = isStreaming ? streaming.columns : (result?.columns ?? []);
   const displayTypes = isStreaming ? [] : (result?.column_types ?? []);
+
+  // Client-side row filter applied when filterText is set
+  const filteredRows = React.useMemo(() => {
+    if (!filterText.trim()) return displayRows;
+    const needle = filterText.toLowerCase();
+    return displayRows.filter((row) =>
+      row.some((cell) => String(cell ?? "").toLowerCase().includes(needle))
+    );
+  }, [displayRows, filterText]);
 
   const dialectConfig =
     activeDialect === "sqlite"
@@ -137,6 +158,19 @@ export function QueryWorkspace() {
           <span>{getDialectLabel(activeDialect)}</span>
         </div>
 
+        {/* EXPLAIN button — only for local DataFusion queries */}
+        {!selectedConnectionId && (
+          <button
+            onClick={() => { runExplain(); setResultTab("explain"); }}
+            disabled={isRunning || isExplaining}
+            className="btn-ghost text-xs flex items-center gap-1.5 text-text-muted"
+            title="Show query execution plan"
+          >
+            {isExplaining ? <Loader2 size={13} className="animate-spin" /> : <FileSearch size={13} />}
+            Explain
+          </button>
+        )}
+
         {result && (
           <span className="text-xs text-text-muted font-mono">
             {result.row_count.toLocaleString()} rows
@@ -149,9 +183,52 @@ export function QueryWorkspace() {
             ↓ {streaming.rows.length.toLocaleString()} rows streaming…
           </span>
         )}
-      </div>
+        {(result || (isStreaming && streaming.rows.length > 0)) && (
+          <button
+            onClick={() => setShowExportModal(true)}
+            className="btn-ghost text-xs flex items-center gap-1.5 text-text-muted ml-auto"
+            title="Export results"
+          >
+            <Download size={13} />
+            Export
+          </button>
+        )}
 
-      {/* SQL Editor */}
+        {/* Save Query button */}
+        {showSaveInput ? (
+          <form
+            className="flex items-center gap-1 ml-auto"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (saveName.trim()) {
+                saveQuery(saveName.trim());
+                setSaveName("");
+                setShowSaveInput(false);
+              }
+            }}
+          >
+            <input
+              autoFocus
+              type="text"
+              placeholder="Query name…"
+              value={saveName}
+              onChange={(e) => setSaveName(e.target.value)}
+              className="text-xs bg-surface-3 border border-border rounded px-2 py-1 text-text-secondary placeholder:text-text-muted outline-none focus:border-accent-blue w-36"
+            />
+            <button type="submit" className="btn-primary text-xs px-2 py-1">Save</button>
+            <button type="button" onClick={() => setShowSaveInput(false)} className="btn-ghost text-xs px-1 py-1"><X size={12} /></button>
+          </form>
+        ) : (
+          <button
+            onClick={() => setShowSaveInput(true)}
+            className={cn("btn-ghost text-xs flex items-center gap-1.5 text-text-muted", !(result || (isStreaming && streaming.rows.length > 0)) && "ml-auto")}
+            title="Save query"
+          >
+            <Bookmark size={13} />
+            Save
+          </button>
+        )}
+      </div>
       <div className="flex-shrink-0" style={{ height: 220 }}>
         <CodeMirror
           value={sql}
@@ -197,9 +274,9 @@ export function QueryWorkspace() {
       )}
 
       {/* Results area */}
-      {(displayRows.length > 0 || isRunning) && (
+      {(displayRows.length > 0 || isRunning || explainPlan) && (
         <div className="flex-1 flex flex-col min-h-0">
-          {/* Result tabs */}
+          {/* Result tabs + filter */}
           <div className="flex-shrink-0 flex items-center gap-0 border-b border-border bg-surface-1 px-2">
             <button
               onClick={() => setResultTab("table")}
@@ -214,7 +291,9 @@ export function QueryWorkspace() {
               Table
               {displayRows.length > 0 && (
                 <span className="ml-1 text-text-muted">
-                  ({displayRows.length.toLocaleString()})
+                  ({filteredRows.length !== displayRows.length
+                    ? `${filteredRows.length.toLocaleString()} / ${displayRows.length.toLocaleString()}`
+                    : displayRows.length.toLocaleString()})
                 </span>
               )}
             </button>
@@ -230,16 +309,49 @@ export function QueryWorkspace() {
               <BarChart2 size={12} />
               Chart
             </button>
+            {explainPlan && (
+              <button
+                onClick={() => setResultTab("explain")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 transition-colors",
+                  resultTab === "explain"
+                    ? "border-accent-mauve text-accent-mauve"
+                    : "border-transparent text-text-muted hover:text-text-secondary"
+                )}
+              >
+                <FileSearch size={12} />
+                Explain
+              </button>
+            )}
+
+            {/* Inline filter input */}
+            {resultTab === "table" && displayRows.length > 0 && (
+              <div className="ml-auto flex items-center gap-1.5 px-2">
+                <Filter size={11} className="text-text-muted" />
+                <input
+                  type="text"
+                  placeholder="Filter rows…"
+                  value={filterText}
+                  onChange={(e) => setFilterText(e.target.value)}
+                  className="text-xs bg-surface-3 border border-border rounded px-2 py-0.5 text-text-secondary placeholder:text-text-muted outline-none focus:border-accent-blue w-32"
+                />
+                {filterText && (
+                  <button onClick={() => setFilterText("")} className="text-text-muted hover:text-text-primary">
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Table or Chart */}
+          {/* Table or Chart or Explain */}
           <div className="flex-1 overflow-hidden min-h-0">
             {resultTab === "table" && (
               <div className="overflow-x-auto h-full">
                 <VirtualTable
                   columns={displayColumns}
                   columnTypes={displayTypes}
-                  rows={displayRows}
+                  rows={filteredRows}
                   height={tableAreaHeight}
                   className="h-full"
                 />
@@ -253,17 +365,32 @@ export function QueryWorkspace() {
                 className="h-full p-2"
               />
             )}
+            {resultTab === "explain" && explainPlan && (
+              <div className="h-full overflow-auto p-4">
+                <pre className="text-xs font-mono text-text-secondary whitespace-pre-wrap leading-5">
+                  {explainPlan}
+                </pre>
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* Empty state */}
-      {!isRunning && displayRows.length === 0 && !error && (
+      {!isRunning && displayRows.length === 0 && !error && !explainPlan && (
         <div className="flex-1 flex flex-col items-center justify-center text-text-muted gap-2">
           <Play size={32} className="opacity-20" />
           <p className="text-sm">Run a SQL query to see results</p>
           <p className="text-xs opacity-60">{getDialectLabel(activeDialect)} dialect · Press ⌘↵ to execute</p>
         </div>
+      )}
+
+      {showExportModal && (
+        <ExportModal
+          sql={sql}
+          rowCount={isStreaming ? streaming.rows.length : (result?.row_count ?? 0)}
+          onClose={() => setShowExportModal(false)}
+        />
       )}
     </div>
   );

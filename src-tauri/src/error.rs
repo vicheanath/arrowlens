@@ -43,6 +43,9 @@ pub enum ErrorCode {
     SerializationError,
     DeserializationError,
 
+    // Export errors
+    ExportError,
+
     // Generic error
     InternalError,
 }
@@ -114,6 +117,12 @@ pub enum AppError {
 
     #[error("Database not found")]
     DatabaseNotFound,
+
+    #[error("Data load error: {0}")]
+    DataLoadError(String),
+
+    #[error("Export error: {0}")]
+    ExportError(String),
 
     #[error("Internal error: {0}")]
     Internal(String),
@@ -197,6 +206,16 @@ impl AppError {
                 ErrorCode::DatabaseNotFound,
                 "Database connection not found".to_string(),
                 Some("Check that the database is still connected.".to_string()),
+            ),
+            AppError::DataLoadError(msg) => (
+                ErrorCode::DatasetLoadFailed,
+                format!("Data load error: {}", msg),
+                Some("Check the file is a valid Arrow IPC file and not corrupted.".to_string()),
+            ),
+            AppError::ExportError(msg) => (
+                ErrorCode::ExportError,
+                format!("Export failed: {}", msg),
+                Some("Ensure the destination path is writable and has enough disk space.".to_string()),
             ),
             AppError::IoError(_) => (
                 ErrorCode::FileAccessDenied,

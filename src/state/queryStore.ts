@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import { HistoryEntry, QueryResult, SavedQuery, StreamChunk } from "../models/query";
 import * as queryService from "../services/queryService";
 import * as databaseService from "../services/databaseService";
@@ -22,6 +23,8 @@ interface QueryState {
   savedQueries: SavedQuery[];
   streaming: StreamingState;
   isStreaming: boolean;
+  explainPlan: string | null;
+  isExplaining: boolean;
 
   setSql: (sql: string) => void;
   runQuery: () => Promise<void>;
@@ -31,11 +34,12 @@ interface QueryState {
   saveQuery: (name: string, tags?: string[]) => void;
   removeSavedQuery: (id: string) => void;
   loadFromHistory: (entry: HistoryEntry) => void;
+  runExplain: (verbose?: boolean) => Promise<void>;
   clearResult: () => void;
   clearError: () => void;
 }
 
-export const useQueryStore = create<QueryState>((set, get) => ({
+export const useQueryStore = create<QueryState>()(persist((set, get) => ({
   sql: `-- Welcome to ArrowLens SQL Workspace
 -- Load a dataset first, then query it by its name.
 -- Example:
@@ -48,6 +52,8 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   savedQueries: [],
   streaming: { queryId: null, columns: [], rows: [], isDone: false },
   isStreaming: false,
+  explainPlan: null,
+  isExplaining: false,
 
   setSql: (sql: string) => set({ sql }),
 
@@ -93,17 +99,6 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     }
 
     const selectedConnectionId = useDatabaseStore.getState().selectedConnectionId;
-    if (selectedConnectionId) {
-      // Streaming bridge is currently implemented for DataFusion datasets only.
-      useToastStore.getState().addToast({
-        type: "info",
-        message: "Streaming is available for local datasets only. Using standard query execution.",
-        title: "Database Streaming",
-        duration: 5000,
-      });
-      await get().runQuery();
-      return;
-    }
 
     set({
       isRunning: true,
@@ -114,7 +109,11 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     });
 
     try {
-      const queryId = await queryService.runStreamingQuery(sql);
+      // Use database streaming if connected, otherwise use dataset streaming
+      const queryId = selectedConnectionId
+        ? await databaseService.runDatabaseQueryStreaming(selectedConnectionId, sql)
+        : await queryService.runStreamingQuery(sql);
+
       set((s) => ({ streaming: { ...s.streaming, queryId } }));
 
       const unlistenChunk = await listen<StreamChunk>(
@@ -196,6 +195,26 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     set({ sql: entry.sql });
   },
 
+  runExplain: async (verbose = false) => {
+    const { sql } = get();
+    if (!sql.trim()) return;
+    set({ isExplaining: true, explainPlan: null });
+    try {
+      const plan = await queryService.explainQuery(sql, verbose);
+      set({ explainPlan: plan, isExplaining: false });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      set({ isExplaining: false });
+      useToastStore.getState().addToast({ type: "error", title: "EXPLAIN failed", message: msg });
+    }
+  },
+
   clearResult: () => set({ result: null, streaming: { queryId: null, columns: [], rows: [], isDone: false } }),
   clearError: () => set({ error: null }),
+}), {
+  name: "arrowlens-query-store",
+  partialize: (state) => ({
+    savedQueries: state.savedQueries,
+    sql: state.sql,
+  }),
 }));

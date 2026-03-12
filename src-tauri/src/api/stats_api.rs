@@ -40,9 +40,18 @@ pub async fn get_schema(
                 .map_err(|e| AppError::SchemaError(e.to_string()))?;
         }
         FileType::Arrow => {
-            return Err(AppError::UnsupportedFormat(
-                "Arrow IPC schema inference not yet implemented".to_string(),
-            ));
+            use crate::loaders::arrow_loader::read_all_batches;
+            use datafusion::datasource::MemTable;
+            use std::sync::Arc;
+            if let Ok((batches, schema)) = read_all_batches(&info.source_path) {
+                if let Ok(mem_table) = MemTable::try_new(schema, vec![batches]) {
+                    let _ = ctx.register_table(&table_name, Arc::new(mem_table));
+                }
+            } else {
+                return Err(AppError::UnsupportedFormat(
+                    "Failed to read Arrow IPC file".to_string(),
+                ));
+            }
         }
     }
 

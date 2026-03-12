@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use sqlx::{any::AnyPoolOptions, AnyPool, Column, Row, TypeInfo};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::engine::database_registry::{DatabaseConnectionInfo, DatabaseRegistry, DatabaseType};
 use crate::error::{AppError, Result};
@@ -147,6 +147,179 @@ pub async fn run_database_query(
         rows: rows_out,
         elapsed_ms: started.elapsed().as_millis() as u64,
     })
+}
+
+/// Stream database query results back as Tauri events with pagination.
+/// Returns the query_id immediately; frontend listens for `query-chunk-{query_id}`.
+#[tauri::command]
+pub async fn run_database_query_streaming(
+    connection_id: String,
+    sql: String,
+    chunk_size: Option<usize>,
+    app: AppHandle,
+    registry: State<'_, Arc<DatabaseRegistry>>,
+) -> Result<String> {
+    use uuid::Uuid;
+    use crate::state::active_queries;
+    use crate::streaming::record_batch_stream::StreamChunk;
+
+    if sql.trim().is_empty() {
+        return Err(AppError::QuerySyntaxError("Query cannot be empty".to_string()));
+    }
+
+    let query_id = Uuid::new_v4().to_string();
+    let chunk_size = chunk_size.unwrap_or(500);
+    let registry_clone = registry.inner().clone();
+    let app_clone = app.clone();
+    let qid = query_id.clone();
+    let sql_clone = sql.clone();
+    let conn_id = connection_id.clone();
+    let qid_cleanup = qid.clone();
+
+    // Register the query
+    active_queries::register_query(&qid);
+
+    tokio::spawn(async move {
+        // Check if cancelled before starting
+        if active_queries::is_cancelled(&qid) {
+            let _ = tauri::Emitter::emit(
+                &app_clone,
+                &format!("query-error-{}", qid),
+                AppError::QueryCancelled.to_response(Some(sql_clone.clone())),
+            );
+            active_queries::cleanup(&qid_cleanup);
+            return;
+        }
+
+        let info = match registry_clone.get(&conn_id) {
+            Some(info) => info,
+            None => {
+                let _ = tauri::Emitter::emit(
+                    &app_clone,
+                    &format!("query-error-{}", qid),
+                    AppError::DatabaseNotFound.to_response(None),
+                );
+                active_queries::cleanup(&qid_cleanup);
+                return;
+            }
+        };
+
+        let pool = match open_pool(&info.connection_string).await {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = tauri::Emitter::emit(
+                    &app_clone,
+                    &format!("query-error-{}", qid),
+                    e.to_response(Some(sql_clone.clone())),
+                );
+                active_queries::cleanup(&qid_cleanup);
+                return;
+            }
+        };
+
+        // Fetch all rows (SQLx doesn't support true async streaming without cursors on all DBs)
+        let rows = match sqlx::query(&sql_clone)
+            .fetch_all(&pool)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = tauri::Emitter::emit(
+                    &app_clone,
+                    &format!("query-error-{}", qid),
+                    AppError::DatabaseQueryError(e.to_string()).to_response(Some(sql_clone.clone())),
+                );
+                active_queries::cleanup(&qid_cleanup);
+                pool.close().await;
+                return;
+            }
+        };
+
+        // Get column info from first row
+        let (columns, _column_types) = if let Some(first) = rows.first() {
+            let cols = first
+                .columns()
+                .iter()
+                .map(|c| c.name().to_string())
+                .collect::<Vec<_>>();
+            let types = first
+                .columns()
+                .iter()
+                .map(|c| c.type_info().name().to_string())
+                .collect::<Vec<_>>();
+            (cols, types)
+        } else {
+            (vec![], vec![])
+        };
+
+        // Stream results in chunks
+        let mut chunk_index = 0usize;
+        for chunk in rows.chunks(chunk_size) {
+            // Check cancellation
+            if active_queries::is_cancelled(&qid) {
+                let _ = tauri::Emitter::emit(
+                    &app_clone,
+                    &format!("query-chunk-{}", qid),
+                    StreamChunk {
+                        query_id: qid.clone(),
+                        chunk_index,
+                        columns: columns.clone(),
+                        rows: vec![],
+                        row_count: 0,
+                        done: true,
+                    },
+                );
+                active_queries::cleanup(&qid_cleanup);
+                pool.close().await;
+                return;
+            }
+
+            // Convert rows to JSON values
+            let mut rows_json = Vec::new();
+            for row in chunk {
+                let mut row_vals = Vec::new();
+                for idx in 0..columns.len() {
+                    row_vals.push(any_cell_to_json(row, idx));
+                }
+                rows_json.push(row_vals);
+            }
+
+            // Emit chunk
+            let _ = tauri::Emitter::emit(
+                &app_clone,
+                &format!("query-chunk-{}", qid),
+                StreamChunk {
+                    query_id: qid.clone(),
+                    chunk_index,
+                    columns: columns.clone(),
+                    row_count: rows_json.len(),
+                    rows: rows_json,
+                    done: false,
+                },
+            );
+            chunk_index += 1;
+        }
+
+        // Emit completion signal
+        let _ = tauri::Emitter::emit(
+            &app_clone,
+            &format!("query-chunk-{}", qid),
+            StreamChunk {
+                query_id: qid.clone(),
+                chunk_index,
+                columns,
+                rows: vec![],
+                row_count: 0,
+                done: true,
+            },
+        );
+
+        active_queries::complete(&qid);
+        active_queries::cleanup(&qid_cleanup);
+        pool.close().await;
+    });
+
+    Ok(query_id)
 }
 
 fn normalize_connection_string(database_type: &DatabaseType, input: &str) -> String {

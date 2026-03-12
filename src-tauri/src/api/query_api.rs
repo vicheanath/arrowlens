@@ -138,6 +138,46 @@ pub async fn get_query_history() -> Result<Vec<HistoryEntry>> {
     Ok(entries)
 }
 
+/// Run EXPLAIN on a SQL query and return the query plan as a string.
+#[tauri::command]
+pub async fn explain_query(
+    sql: String,
+    verbose: Option<bool>,
+    registry: State<'_, Arc<DatasetRegistry>>,
+) -> Result<String> {
+    if sql.trim().is_empty() {
+        return Err(AppError::QuerySyntaxError("Query cannot be empty".to_string()));
+    }
+
+    let engine = QueryEngine::new(registry.inner().clone());
+    let verbose = verbose.unwrap_or(false);
+    let explain_sql = if verbose {
+        format!("EXPLAIN VERBOSE {}", sql)
+    } else {
+        format!("EXPLAIN {}", sql)
+    };
+
+    let result = engine.execute_query(&explain_sql)
+        .await
+        .map_err(|_| {
+            // DataFusion EXPLAIN returns rows, not an error — this handles edge cases
+            AppError::QueryError("Failed to generate query plan".to_string())
+        })?;
+
+    // Concatenate plan rows into a single string for display
+    let plan_lines: Vec<String> = result.rows.iter().map(|row| {
+        row.iter()
+            .map(|v| match v {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("  ")
+    }).collect();
+
+    Ok(plan_lines.join("\n"))
+}
+
 fn record_history(
     sql: &str,
     elapsed_ms: Option<u64>,

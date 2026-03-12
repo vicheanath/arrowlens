@@ -49,9 +49,13 @@ impl QueryEngine {
                     .await?;
             }
             FileType::Arrow => {
-                ctx.register_avro(&table_name, path, AvroReadOptions::default())
-                    .await
-                    .unwrap_or_default();
+                use crate::loaders::arrow_loader::read_all_batches;
+                use datafusion::datasource::MemTable;
+                if let Ok((batches, schema)) = read_all_batches(path) {
+                    if let Ok(mem_table) = MemTable::try_new(schema, vec![batches]) {
+                        let _ = ctx.register_table(&table_name, Arc::new(mem_table));
+                    }
+                }
             }
         }
         Ok(())

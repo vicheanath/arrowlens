@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::engine::dataset_registry::{DatasetInfo, DatasetRegistry, FileType};
 use crate::error::{AppError, Result};
-use crate::loaders::{csv_loader::CsvLoader, json_loader::JsonLoader, parquet_loader::ParquetLoader, DatasetLoader, LoaderPreview};
+use crate::loaders::{arrow_loader::ArrowLoader, csv_loader::CsvLoader, json_loader::JsonLoader, parquet_loader::ParquetLoader, DatasetLoader, LoaderPreview};
 
 /// Load a dataset from disk and register it in the registry.
 #[tauri::command]
@@ -53,7 +53,12 @@ pub async fn load_dataset(
             let schema = loader.infer_schema(&path).await.unwrap_or_default();
             (count, schema)
         }
-        FileType::Arrow => (0, String::new()),
+        FileType::Arrow => {
+            let loader = ArrowLoader;
+            let count = loader.count_rows(&path).await.unwrap_or(0);
+            let schema = loader.infer_schema(&path).await.unwrap_or_default();
+            (count, schema)
+        }
     };
 
     info.row_count = Some(row_count);

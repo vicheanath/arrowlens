@@ -51,3 +51,15 @@ export function runDatabaseQuery(
     limit: limit ?? null,
   });
 }
+
+export function runDatabaseQueryStreaming(
+  connectionId: string,
+  sql: string,
+  chunkSize?: number,
+): Promise<string> {
+  return invokeCommand<string>("run_database_query_streaming", {
+    connection_id: connectionId,
+    sql,
+    chunk_size: chunkSize ?? null,
+  });
+}
