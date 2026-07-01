@@ -62,7 +62,15 @@ impl QueryEngine {
     }
 
     /// Execute a SQL query and return all results at once (for smaller result sets).
+    ///
+    /// A row cap is pushed into the physical plan via `LIMIT cap + 1` so the scan
+    /// stops early instead of materializing and JSON-serializing an unbounded
+    /// result. One extra row is requested to detect (and flag) truncation. If the
+    /// plan does not support a limit (e.g. EXPLAIN, DDL) we fall back to the plain
+    /// collect.
     pub async fn execute_query(&self, sql: &str) -> Result<QueryResult> {
+        use crate::streaming::result_serializer::MAX_RESULT_ROWS;
+
         let ctx = self.build_context().await?;
         let start = Instant::now();
 
@@ -71,19 +79,62 @@ impl QueryEngine {
             .await
             .map_err(|e| AppError::QueryError(e.to_string()))?;
 
+        let batches = match df.clone().limit(0, Some(MAX_RESULT_ROWS + 1)) {
+            Ok(limited) => limited
+                .collect()
+                .await
+                .map_err(|e| AppError::QueryError(e.to_string()))?,
+            // Some logical plans (EXPLAIN, statements with no output relation)
+            // reject an outer LIMIT — run them unmodified.
+            Err(_) => df
+                .collect()
+                .await
+                .map_err(|e| AppError::QueryError(e.to_string()))?,
+        };
+
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+
+        let mut result = crate::streaming::result_serializer::serialize_batches(
+            &batches,
+            elapsed_ms,
+        )?;
+
+        if result.row_count > MAX_RESULT_ROWS {
+            result.rows.truncate(MAX_RESULT_ROWS);
+            result.row_count = MAX_RESULT_ROWS;
+            result.truncated = true;
+        }
+
+        Ok(result)
+    }
+
+    /// Execute one page of a query: skip `offset` rows and return at most
+    /// `limit`. The window is pushed into the plan via the native DataFrame
+    /// `limit(skip, fetch)` API so the scan stops early — no SQL `OFFSET`
+    /// rewriting and no dialect dependency.
+    pub async fn execute_query_page(
+        &self,
+        sql: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<QueryResult> {
+        let ctx = self.build_context().await?;
+        let start = Instant::now();
+
+        let df = ctx
+            .sql(sql)
+            .await
+            .map_err(|e| AppError::QueryError(e.to_string()))?
+            .limit(offset, Some(limit))
+            .map_err(|e| AppError::QueryError(e.to_string()))?;
+
         let batches = df
             .collect()
             .await
             .map_err(|e| AppError::QueryError(e.to_string()))?;
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
-
-        let result = crate::streaming::result_serializer::serialize_batches(
-            &batches,
-            elapsed_ms,
-        )?;
-
-        Ok(result)
+        crate::streaming::result_serializer::serialize_batches(&batches, elapsed_ms)
     }
 
     /// Execute a SQL query and return a streaming DataFusion DataFrame for chunk-by-chunk delivery.

@@ -1,8 +1,28 @@
 import { invokeCommand } from "./tauriService";
-import { HistoryEntry, QueryResult } from "../models/query";
+import { HistoryEntry, QueryResult, StatementResult } from "../models/query";
 
 export function runQuery(sql: string, connectionId?: string | null): Promise<QueryResult> {
   return invokeCommand<QueryResult>("run_query", { sql, connectionId: connectionId ?? null });
+}
+
+/** Fetch one page of a read query (skip `offset` rows, return at most `limit`). */
+export function runQueryPage(
+  sql: string,
+  offset: number,
+  limit: number,
+  connectionId?: string | null,
+): Promise<QueryResult> {
+  return invokeCommand<QueryResult>("run_query_page", {
+    sql,
+    connectionId: connectionId ?? null,
+    offset,
+    limit,
+  });
+}
+
+/** Run every statement in a script; returns one result set per statement. */
+export function runQueryMulti(sql: string, connectionId?: string | null): Promise<StatementResult[]> {
+  return invokeCommand<StatementResult[]>("run_query_multi", { sql, connectionId: connectionId ?? null });
 }
 
 /**

@@ -1,7 +1,135 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@import "tw-animate-css";
 
+@custom-variant dark (&:is(.dark *));
+
+/* ------------------------------------------------------------------ *
+ * Project design tokens (ported from the former tailwind.config.js)   *
+ * ------------------------------------------------------------------ */
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", Consolas, monospace;
+
+  --color-surface-0: #0d0d14;
+  --color-surface-1: #13131f;
+  --color-surface-2: #181826;
+  --color-surface-3: #1e1e2e;
+  --color-surface-4: #252538;
+  --color-surface-5: #313149;
+
+  --color-border-subtle: #1e1e2e;
+  --color-border-strong: #3a3a52;
+
+  --color-text-primary: #cdd6f4;
+  --color-text-secondary: #a6adc8;
+  --color-text-muted: #6c7086;
+  --color-text-inverse: #1e1e2e;
+
+  --color-accent-blue: #89b4fa;
+  --color-accent-green: #a6e3a1;
+  --color-accent-yellow: #f9e2af;
+  --color-accent-red: #f38ba8;
+  --color-accent-teal: #94e2d5;
+  --color-accent-mauve: #cba6f7;
+  --color-accent-peach: #fab387;
+  --color-accent-sky: #89dceb;
+
+  /* Semantic "caution" color for warning callouts/banners (no shadcn equivalent;
+     the neutral semantic layer has destructive but no warning). */
+  --color-warning: #fab387;
+  --color-warning-foreground: #1e1e2e;
+
+  --shadow-panel: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-tooltip: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
+/* ------------------------------------------------------------------ *
+ * shadcn / Base UI semantic tokens (mapped to the palette above)      *
+ * ------------------------------------------------------------------ */
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root,
+.dark {
+  --radius: 0.5rem;
+
+  /* shadcn default "neutral" dark theme */
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.371 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.922 0 0);
+  --sidebar-primary-foreground: oklch(0.205 0 0);
+  --sidebar-accent: oklch(0.371 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* ------------------------------------------------------------------ *
+ * Base styles                                                         *
+ * ------------------------------------------------------------------ */
 @layer base {
   :root {
     color-scheme: dark;
@@ -49,55 +177,64 @@
   }
 }
 
-@layer components {
-  .btn {
-    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium
-           transition-colors duration-100 cursor-pointer select-none;
-  }
-  .btn-primary {
-    @apply btn bg-accent-blue text-surface-0 hover:bg-blue-400 active:scale-95;
-  }
-  .btn-ghost {
-    @apply btn text-text-secondary hover:text-text-primary hover:bg-surface-4 active:scale-95;
-  }
-  .btn-danger {
-    @apply btn text-accent-red hover:bg-accent-red/10 active:scale-95;
-  }
-
-  .panel {
-    @apply bg-surface-2 border border-border rounded-lg overflow-hidden;
-  }
-
-  .input {
-    @apply bg-surface-3 border border-border rounded px-2 py-1 text-sm
-           text-text-primary placeholder:text-text-muted
-           focus:outline-none focus:border-accent-blue/60 focus:ring-1 focus:ring-accent-blue/30
-           transition-colors duration-100;
-  }
-
-  .tag {
-    @apply inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono;
-  }
-  .tag-string  { @apply tag bg-accent-green/10  text-accent-green; }
-  .tag-numeric { @apply tag bg-accent-blue/10   text-accent-blue; }
-  .tag-date    { @apply tag bg-accent-yellow/10 text-accent-yellow; }
-  .tag-boolean { @apply tag bg-accent-mauve/10  text-accent-mauve; }
-  .tag-binary  { @apply tag bg-text-muted/10    text-text-muted; }
-  .tag-other   { @apply tag bg-surface-4        text-text-muted; }
+/* ------------------------------------------------------------------ *
+ * Component / utility classes (ported to v4 @utility)                 *
+ * ------------------------------------------------------------------ */
+@utility btn {
+  @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium
+         transition-colors duration-100 cursor-pointer select-none;
+}
+@utility btn-primary {
+  @apply btn bg-primary text-primary-foreground hover:bg-primary/90 active:scale-95;
+}
+@utility btn-ghost {
+  @apply btn text-foreground/80 hover:text-foreground hover:bg-accent active:scale-95;
+}
+@utility btn-danger {
+  @apply btn text-destructive hover:bg-destructive/10 active:scale-95;
 }
 
-@layer utilities {
-  .font-mono {
-    font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
-  }
-  .no-scrollbar::-webkit-scrollbar {
+@utility panel {
+  @apply bg-card border border-border rounded-lg overflow-hidden;
+}
+
+@utility input {
+  @apply bg-transparent border border-input rounded px-2 py-1 text-sm
+         text-foreground placeholder:text-muted-foreground
+         focus:outline-none focus:border-ring focus:ring-1 focus:ring-ring/50
+         transition-colors duration-100;
+}
+
+@utility tag {
+  @apply inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono;
+}
+@utility tag-string {
+  @apply tag bg-accent-green/10 text-accent-green;
+}
+@utility tag-numeric {
+  @apply tag bg-accent-blue/10 text-accent-blue;
+}
+@utility tag-date {
+  @apply tag bg-accent-yellow/10 text-accent-yellow;
+}
+@utility tag-boolean {
+  @apply tag bg-accent-mauve/10 text-accent-mauve;
+}
+@utility tag-binary {
+  @apply tag bg-text-muted/10 text-text-muted;
+}
+@utility tag-other {
+  @apply tag bg-surface-4 text-text-muted;
+}
+
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
     display: none;
   }
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-  .text-truncate {
-    @apply overflow-hidden text-ellipsis whitespace-nowrap;
-  }
+}
+
+@utility text-truncate {
+  @apply overflow-hidden text-ellipsis whitespace-nowrap;
 }

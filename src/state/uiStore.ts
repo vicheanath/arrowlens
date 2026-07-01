@@ -1,7 +1,25 @@
 import React, { createContext, useContext, useMemo, useState } from "react";
 
 export type ActiveTab = "explorer" | "query" | "chart" | "history";
-export type ResultTab = "table" | "chart" | "explain";
+export type ResultTab =
+  | "table"
+  | "chart"
+  | "analyzer"
+  | "explain"
+  | "schema_detail"
+  | "schema_editor"
+  | "er_diagram";
+
+/** Result tabs that show the active source's schema rather than query output. */
+export const SCHEMA_RESULT_TABS: ResultTab[] = [
+  "schema_detail",
+  "schema_editor",
+  "er_diagram",
+];
+
+export function isSchemaResultTab(tab: ResultTab): boolean {
+  return SCHEMA_RESULT_TABS.includes(tab);
+}
 export type SidebarSection = "datasets" | "history" | "saved";
 
 interface UiState {
@@ -52,11 +70,41 @@ interface FullQueryState {
   toggleFullQuery: () => void;
 }
 
+/** Cross-component intent: ask the sidebar to open its "New Connection" form. */
+interface OnboardingState {
+  newConnectionNonce: number;
+  requestNewConnection: () => void;
+}
+
+/** ALTER operations the schema editor can be deep-linked into. Mirrors
+ * `AlterOperation["kind"]` in schemaDdl.ts. */
+export type SchemaEditOperation =
+  | "add_column"
+  | "rename_column"
+  | "drop_column"
+  | "rename_table";
+
+/** Cross-component intent: preselect a table/column in the schema editor. The
+ * `nonce` lets the editor re-apply even when the same target is requested twice. */
+export interface SchemaEditTarget {
+  tableId: string;
+  column?: string;
+  operation?: SchemaEditOperation;
+  nonce: number;
+}
+
+interface SchemaEditState {
+  schemaEditTarget: SchemaEditTarget | null;
+  requestSchemaEdit: (target: Omit<SchemaEditTarget, "nonce">) => void;
+}
+
 const ActiveTabContext = createContext<ActiveTabState | null>(null);
 const ResultTabContext = createContext<ResultTabState | null>(null);
 const SidebarContext = createContext<SidebarState | null>(null);
 const CommandPaletteContext = createContext<CommandPaletteState | null>(null);
 const FullQueryContext = createContext<FullQueryState | null>(null);
+const OnboardingContext = createContext<OnboardingState | null>(null);
+const SchemaEditContext = createContext<SchemaEditState | null>(null);
 
 export function UiProvider({ children }: { children: React.ReactNode }) {
   const [activeTab, setActiveTab] = useState<ActiveTab>("query");
@@ -65,6 +113,8 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isFullQuery, setIsFullQuery] = useState(false);
+  const [newConnectionNonce, setNewConnectionNonce] = useState(0);
+  const [schemaEditTarget, setSchemaEditTarget] = useState<SchemaEditTarget | null>(null);
 
   const activeTabValue = useMemo(
     () => ({ activeTab, setActiveTab }),
@@ -104,6 +154,23 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
     [isFullQuery],
   );
 
+  const onboardingValue = useMemo(
+    () => ({
+      newConnectionNonce,
+      requestNewConnection: () => setNewConnectionNonce((current) => current + 1),
+    }),
+    [newConnectionNonce],
+  );
+
+  const schemaEditValue = useMemo(
+    () => ({
+      schemaEditTarget,
+      requestSchemaEdit: (target: Omit<SchemaEditTarget, "nonce">) =>
+        setSchemaEditTarget((current) => ({ ...target, nonce: (current?.nonce ?? 0) + 1 })),
+    }),
+    [schemaEditTarget],
+  );
+
   return React.createElement(
     ActiveTabContext.Provider,
     { value: activeTabValue },
@@ -116,7 +183,15 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
         React.createElement(
           CommandPaletteContext.Provider,
           { value: commandPaletteValue },
-          React.createElement(FullQueryContext.Provider, { value: fullQueryValue }, children),
+          React.createElement(
+            FullQueryContext.Provider,
+            { value: fullQueryValue },
+            React.createElement(
+              OnboardingContext.Provider,
+              { value: onboardingValue },
+              React.createElement(SchemaEditContext.Provider, { value: schemaEditValue }, children),
+            ),
+          ),
         ),
       ),
     ),
@@ -149,6 +224,14 @@ export function useCommandPaletteState() {
 
 export function useFullQueryState() {
   return useRequiredContext(FullQueryContext, "useFullQueryState");
+}
+
+export function useOnboarding() {
+  return useRequiredContext(OnboardingContext, "useOnboarding");
+}
+
+export function useSchemaEdit() {
+  return useRequiredContext(SchemaEditContext, "useSchemaEdit");
 }
 
 export function useUiStore(): UiState {

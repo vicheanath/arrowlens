@@ -4,6 +4,21 @@ export interface QueryResult {
   rows: unknown[][];
   row_count: number;
   elapsed_ms: number;
+  /** Result was capped at the display row limit; export to get all rows. */
+  truncated?: boolean;
+}
+
+/** One result set produced by a statement in a multi-statement script run. */
+export interface StatementResult {
+  index: number;
+  sql: string;
+  columns: string[];
+  column_types: string[];
+  rows: unknown[][];
+  row_count: number;
+  elapsed_ms: number;
+  truncated: boolean;
+  error: string | null;
 }
 
 export interface StreamChunk {

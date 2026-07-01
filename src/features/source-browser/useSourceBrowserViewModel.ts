@@ -4,6 +4,7 @@ import { DatabaseType } from "../../models/database";
 import { useDatasetActions, useDatasetCollectionState, useDatasetMetadataState } from "../../state/datasetStore";
 import { useDatabaseActions, useDatabaseState } from "../../state/databaseStore";
 import { useQuerySqlStore } from "../../state/queryStore";
+import { useOnboarding } from "../../state/uiStore";
 import { buildSelectAllSql, buildSelectColumnSql } from "../../services/sqlTemplateService";
 import { useSourceCatalog } from "../source-catalog";
 
@@ -26,6 +27,7 @@ export function useSourceBrowserViewModel() {
     selectedConnectionId,
     tablesByConnection,
     schemaTreeByConnection,
+    schemaDetailByConnection,
     isLoading: isDbLoading,
     isLoadingTables,
     error: dbError,
@@ -49,11 +51,20 @@ export function useSourceBrowserViewModel() {
   } = useSourceCatalog();
 
   const { setSql } = useQuerySqlStore();
+  const { newConnectionNonce } = useOnboarding();
 
   useEffect(() => {
     loadDatasets();
     loadConnections();
   }, [loadDatasets, loadConnections]);
+
+  // The welcome screen / command surfaces can request the New Connection form.
+  useEffect(() => {
+    if (newConnectionNonce > 0) {
+      setConnectionsOpen(true);
+      setAddingConnection(true);
+    }
+  }, [newConnectionNonce]);
 
   const handleImport = async () => {
     try {
@@ -68,38 +79,60 @@ export function useSourceBrowserViewModel() {
   };
 
   const handleConnectDatabase = async () => {
+    // The database store already surfaces success/failure toasts and re-throws on
+    // error; we swallow here (after the toast) so a bad connection string doesn't
+    // bubble up as an unhandled rejection, and we keep the form open to fix it.
     if (dbType === "sqlite") {
       const file = await openDialog({
         multiple: false,
         filters: [{ name: "SQLite", extensions: ["db", "sqlite", "sqlite3"] }],
       });
-      if (typeof file === "string") {
+      if (typeof file !== "string") return;
+      try {
         await connectSqliteDatabase(file, dbName || undefined);
         setDbName("");
         setDbConnString("");
         setAddingConnection(false);
+      } catch {
+        /* toast already shown by the store */
       }
       return;
     }
 
     if (!dbConnString.trim()) return;
-    await connectDatabase(dbType, dbConnString.trim(), dbName || undefined);
-    setDbConnString("");
-    setDbName("");
-    setAddingConnection(false);
+    try {
+      await connectDatabase(dbType, dbConnString.trim(), dbName || undefined);
+      setDbConnString("");
+      setDbName("");
+      setAddingConnection(false);
+    } catch {
+      /* toast already shown by the store; keep the form open to fix the string */
+    }
   };
 
-  const handleTableQuery = async (tableName: string) => {
-    const sql = await buildSelectAllSql(tableName, selectedConnectionId, 100);
+  const handleTableQuery = async (connectionId: string, tableName: string) => {
+    // Make this connection the active source first, otherwise a query run while
+    // a dataset (or another connection) is active would route to the wrong
+    // backend (e.g. a DataFusion query against a DB table that doesn't exist).
+    const source = databaseSources.find((entry) => entry.connectionId === connectionId) ?? null;
+    if (source) await selectSource(source);
+    const sql = await buildSelectAllSql(tableName, connectionId, 100);
     setSql(sql);
   };
 
   const handleDatasetQuery = async (tableName: string) => {
+    // Querying a dataset must also make it the active source, otherwise a
+    // currently-selected DB connection would route this DataFusion query to
+    // that database (e.g. "relation ... does not exist" against Postgres).
+    const source = datasetSources.find((entry) => entry.name === tableName) ?? null;
+    if (source) await selectSource(source);
     const sql = await buildSelectAllSql(tableName, null, 100);
     setSql(sql);
   };
 
   const handleDatasetColumnQuery = async (tableName: string, columnName: string) => {
+    const source = datasetSources.find((entry) => entry.name === tableName) ?? null;
+    if (source) await selectSource(source);
     const sql = await buildSelectColumnSql(tableName, columnName, null, 100);
     setSql(sql);
   };
@@ -188,6 +221,7 @@ export function useSourceBrowserViewModel() {
     selectedConnectionId,
     tablesByConnection,
     schemaTreeByConnection,
+    schemaDetailByConnection,
     isDbLoading,
     isLoadingTables,
     dbError,

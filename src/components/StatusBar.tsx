@@ -7,6 +7,7 @@ import { useDebugErrorState, useDebugModeState } from "../state/debugStore";
 import { formatDuration, formatNumber } from "../utils/formatters";
 import { getDialectLabel } from "../utils/sql";
 import { cn } from "../utils/formatters";
+import { Separator } from "@/components/ui/separator";
 
 export function StatusBar() {
   const { isRunning, result, error, streaming, isStreaming } = useQueryExecutionState();
@@ -25,21 +26,21 @@ export function StatusBar() {
   const elapsed = isStreaming ? null : result?.elapsed_ms ?? null;
 
   return (
-    <footer className="h-6 flex-shrink-0 flex items-center gap-4 px-3 bg-surface-1 border-t border-border text-xs text-text-muted select-none">
+    <footer className="flex h-6 flex-shrink-0 select-none items-center gap-4 border-t border-border bg-card px-3 text-xs text-muted-foreground">
       {/* Left section */}
-      <div className="flex items-center gap-3 flex-1">
+      <div className="flex flex-1 items-center gap-3">
         {selectedConnection ? (
           <div className="flex items-center gap-1">
             <Database size={11} />
-            <span className="text-text-secondary">{selectedConnection.name}</span>
-            <span className="text-text-muted">({getDialectLabel(activeDialect)})</span>
+            <span className="text-foreground/80">{selectedConnection.name}</span>
+            <span className="text-muted-foreground">({getDialectLabel(activeDialect)})</span>
           </div>
         ) : selectedDataset && (
           <div className="flex items-center gap-1">
             <Database size={11} />
-            <span className="text-text-secondary">{selectedDataset.name}</span>
+            <span className="text-foreground/80">{selectedDataset.name}</span>
             {selectedDataset.row_count !== null && (
-              <span className="text-text-muted">
+              <span className="text-muted-foreground">
                 ({formatNumber(selectedDataset.row_count)} rows)
               </span>
             )}
@@ -50,21 +51,21 @@ export function StatusBar() {
       {/* Center — query status */}
       <div className="flex items-center gap-2">
         {error && (
-          <div className="flex items-center gap-1 text-accent-red">
+          <div className="flex items-center gap-1 text-destructive">
             <AlertCircle size={11} />
             <span className="max-w-xs truncate">{error}</span>
           </div>
         )}
 
         {isRunning && (
-          <div className="flex items-center gap-1 text-accent-yellow">
+          <div className="flex items-center gap-1 text-foreground">
             <Zap size={11} className="animate-pulse" />
             <span>Running…</span>
           </div>
         )}
 
         {result && !isRunning && (
-          <span className="text-accent-green font-mono">
+          <span className="font-mono text-foreground">
             {formatNumber(rowCount)} rows
             {elapsed !== null && ` · ${formatDuration(elapsed)}`}
           </span>
@@ -72,21 +73,21 @@ export function StatusBar() {
       </div>
 
       {/* Right section */}
-      <div className="flex items-center gap-3 text-text-muted">
+      <div className="flex items-center gap-3 text-muted-foreground">
         <button
           onClick={toggleDebugMode}
           className={cn(
             "flex items-center gap-1 transition-colors",
-            debugMode ? "text-accent-peach" : "hover:text-text-secondary"
+            debugMode ? "text-foreground" : "hover:text-foreground/80"
           )}
           title="Toggle debug mode"
         >
           <Bug size={11} />
           <span>{debugMode ? "Debug On" : "Debug"}</span>
-          {debugMode && lastError && <span className="text-accent-red">*</span>}
+          {debugMode && lastError && <span className="text-destructive">*</span>}
         </button>
         <span>{datasets.length} dataset{datasets.length !== 1 ? "s" : ""}</span>
-        <span className="text-border">|</span>
+        <Separator orientation="vertical" className="h-3" />
         <span>ArrowLens v0.1.0</span>
       </div>
     </footer>

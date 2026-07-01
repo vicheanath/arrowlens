@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { QueryTab } from "../../models/queryTab";
 import { SqlDialect } from "../../utils/sql";
 
@@ -40,15 +40,30 @@ export function useWorkspaceSqlSession({
 
   const activeTabSql = activeTab ? getTabSql(activeTab.id) : "";
 
+  // `getTabSql` changes identity on every tab edit. Read it through a ref so the
+  // tab-switch effect below doesn't re-fire on edits — otherwise it ping-pongs
+  // with the `sql ← tab` sync (effect below) and blows the update depth.
+  const getTabSqlRef = useRef(getTabSql);
+  getTabSqlRef.current = getTabSql;
+  const didMountRef = useRef(false);
+
   useEffect(() => {
     if (tabs.length === 1 && !getTabSql(tabs[0].id)) {
       updateTabSql(tabs[0].id, sql);
     }
   }, [getTabSql, sql, tabs, updateTabSql]);
 
+  // Load a tab's stored SQL into the editor only when the *active tab changes*
+  // (a real tab switch), not on every keystroke. Skipping the first mount lets
+  // the effect above seed the new tab from the restored `sql` instead of this
+  // effect clobbering `sql` with the still-empty tab.
   useEffect(() => {
-    if (activeTab) setSql(getTabSql(activeTab.id));
-  }, [activeTab?.id, getTabSql, setSql]);
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    if (activeTab) setSql(getTabSqlRef.current(activeTab.id));
+  }, [activeTab?.id, setSql]);
 
   useEffect(() => {
     if (activeTab && getTabSql(activeTab.id) !== sql) {
@@ -56,11 +71,15 @@ export function useWorkspaceSqlSession({
     }
   }, [activeTab, getTabSql, sql, updateTabSql]);
 
-  const onEditorSqlChange = (nextSql: string) => {
-    if (!activeTab) return;
-    updateTabSql(activeTab.id, nextSql);
-    setSql(nextSql);
-  };
+  // Stable identity so the CodeMirror editor isn't reconfigured every render.
+  const onEditorSqlChange = useCallback(
+    (nextSql: string) => {
+      if (!activeTab) return;
+      updateTabSql(activeTab.id, nextSql);
+      setSql(nextSql);
+    },
+    [activeTab, updateTabSql, setSql],
+  );
 
   const createNewTab = () => {
     void (async () => {

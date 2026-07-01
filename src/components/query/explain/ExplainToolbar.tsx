@@ -35,32 +35,33 @@ export function ExplainToolbar({
 }: ExplainToolbarProps) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="flex items-center gap-1 bg-surface-3 border border-border rounded px-2 py-1">
-        <Search size={12} className="text-text-muted" />
+      <div className="flex items-center gap-1 bg-muted border border-border rounded px-2 py-1">
+        <Search size={12} className="text-muted-foreground" />
         <input
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder="Search operators..."
-          className="bg-transparent text-xs text-text-secondary placeholder:text-text-muted outline-none w-44"
+          aria-label="Search plan operators"
+          className="bg-transparent text-xs text-foreground/80 placeholder:text-muted-foreground outline-none w-44"
         />
       </div>
 
       <div className="flex items-center gap-1">
         <button
           onClick={() => onViewModeChange("plan")}
-          className={cn("btn text-xs", viewMode === "plan" ? "bg-accent-blue/20 text-accent-blue" : "btn-ghost")}
+          className={cn("btn text-xs", viewMode === "plan" ? "bg-primary/20 text-primary" : "btn-ghost")}
         >
           <Workflow size={12} /> Plan
         </button>
         <button
           onClick={() => onViewModeChange("tree")}
-          className={cn("btn text-xs", viewMode === "tree" ? "bg-accent-blue/20 text-accent-blue" : "btn-ghost")}
+          className={cn("btn text-xs", viewMode === "tree" ? "bg-primary/20 text-primary" : "btn-ghost")}
         >
           <TreePine size={12} /> Tree
         </button>
         <button
           onClick={() => onViewModeChange("text")}
-          className={cn("btn text-xs", viewMode === "text" ? "bg-accent-blue/20 text-accent-blue" : "btn-ghost")}
+          className={cn("btn text-xs", viewMode === "text" ? "bg-primary/20 text-primary" : "btn-ghost")}
         >
           Text
         </button>
@@ -72,7 +73,7 @@ export function ExplainToolbar({
 
       <button
         onClick={onHotOpsToggle}
-        className={cn("btn text-xs flex items-center gap-1", showOnlyExpensive ? "bg-accent-red/20 text-accent-red" : "btn-ghost")}
+        className={cn("btn text-xs flex items-center gap-1", showOnlyExpensive ? "bg-destructive/20 text-destructive" : "btn-ghost")}
         title="Show operators with estimated cost >= 8%"
       >
         <Filter size={12} /> Hot Ops

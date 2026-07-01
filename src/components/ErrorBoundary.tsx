@@ -1,5 +1,6 @@
 import React, { ErrorInfo, ReactNode } from 'react';
-import { AlertCircle, X } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
+import { Button } from './ui/button';
 
 interface Props {
   children: ReactNode;
@@ -47,21 +48,21 @@ export default class ErrorBoundary extends React.Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex h-screen w-screen items-center justify-center bg-slate-950 p-4">
-          <div className="max-w-2xl rounded-lg border border-red-500/30 bg-slate-900 p-8 shadow-lg">
+        <div className="flex h-screen w-screen items-center justify-center bg-background p-4">
+          <div className="max-w-2xl rounded-lg border border-destructive/30 bg-card p-8 shadow-[var(--shadow-panel)]">
             <div className="mb-4 flex items-center gap-3">
-              <AlertCircle className="h-6 w-6 text-red-500" />
-              <h1 className="text-xl font-bold text-red-400">Something went wrong</h1>
+              <AlertCircle className="h-6 w-6 text-destructive" />
+              <h1 className="text-xl font-bold text-destructive">Something went wrong</h1>
             </div>
 
             <div className="mb-6 space-y-2">
-              <p className="text-sm text-slate-300">{this.state.error?.message}</p>
+              <p className="text-sm text-foreground/80">{this.state.error?.message}</p>
               {this.state.errorInfo && (
                 <details className="mt-4">
-                  <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-300">
+                  <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
                     View error details
                   </summary>
-                  <pre className="mt-2 overflow-auto rounded bg-slate-950 p-3 text-xs text-slate-400">
+                  <pre className="mt-2 overflow-auto rounded bg-background p-3 font-mono text-xs text-muted-foreground">
                     {this.state.errorInfo.componentStack}
                   </pre>
                 </details>
@@ -69,18 +70,10 @@ export default class ErrorBoundary extends React.Component<Props, State> {
             </div>
 
             <div className="flex gap-3">
-              <button
-                onClick={this.resetError}
-                className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                Try Again
-              </button>
-              <button
-                onClick={() => window.location.reload()}
-                className="rounded bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600"
-              >
+              <Button onClick={this.resetError}>Try Again</Button>
+              <Button variant="outline" onClick={() => window.location.reload()}>
                 Reload App
-              </button>
+              </Button>
             </div>
           </div>
         </div>

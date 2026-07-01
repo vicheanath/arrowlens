@@ -40,12 +40,6 @@ export function useQueryExecutionShortcuts({
     }
   };
 
-  const runSelectedOnly = () => {
-    const selectedSql = getSelectedSql(editorViewRef);
-    if (!selectedSql) return;
-    void runQuery(selectedConnectionId, selectedSql);
-  };
-
   useKeyboardShortcuts([
     { key: "Enter", meta: true, handler: () => runWithSelectionFallback(false) },
     { key: "Enter", meta: true, shift: true, handler: () => runWithSelectionFallback(true) },
@@ -53,7 +47,6 @@ export function useQueryExecutionShortcuts({
 
   return {
     runWithSelectionFallback,
-    runSelectedOnly,
     getSelectedSql: () => getSelectedSql(editorViewRef),
   };
 }

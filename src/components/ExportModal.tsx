@@ -1,14 +1,24 @@
 import React, { useState } from "react";
-import { Download, X, FileText, FileJson, Database, Loader2 } from "lucide-react";
+import { Download, FileText, FileJson, Database, Loader2 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { exportQueryResults, ExportFormat } from "../services/exportService";
 import { useToastStore } from "../utils/toast";
 import { cn } from "../utils/formatters";
 import { errorToMessage } from "../utils/errors";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface ExportModalProps {
   sql: string;
   rowCount: number;
+  connectionId: string | null;
   onClose: () => void;
 }
 
@@ -36,7 +46,7 @@ const FORMATS: { id: ExportFormat; label: string; ext: string; icon: React.React
   },
 ];
 
-export function ExportModal({ sql, rowCount, onClose }: ExportModalProps) {
+export function ExportModal({ sql, rowCount, connectionId, onClose }: ExportModalProps) {
   const [selectedFormat, setSelectedFormat] = useState<ExportFormat>("csv");
   const [isExporting, setIsExporting] = useState(false);
   const { addToast } = useToastStore();
@@ -52,7 +62,7 @@ export function ExportModal({ sql, rowCount, onClose }: ExportModalProps) {
 
     setIsExporting(true);
     try {
-      const exported = await exportQueryResults(sql, destPath, selectedFormat);
+      const exported = await exportQueryResults(sql, destPath, selectedFormat, connectionId);
       addToast({
         type: "success",
         title: "Export complete",
@@ -72,77 +82,56 @@ export function ExportModal({ sql, rowCount, onClose }: ExportModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div
-        className="bg-surface-1 border border-border rounded-lg shadow-xl w-[420px] p-5"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2 text-text-primary font-semibold">
-            <Download size={16} />
-            <span>Export Results</span>
-          </div>
-          <button onClick={onClose} className="text-text-muted hover:text-text-primary">
-            <X size={16} />
-          </button>
-        </div>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Download size={16} /> Export Results
+          </DialogTitle>
+          <DialogDescription>
+            Exporting <span className="font-mono text-foreground">{rowCount.toLocaleString()}</span> rows
+          </DialogDescription>
+        </DialogHeader>
 
-        <p className="text-xs text-text-muted mb-4">
-          Exporting <span className="text-text-secondary font-mono">{rowCount.toLocaleString()}</span> rows
-        </p>
-
-        {/* Format selection */}
-        <div className="space-y-2 mb-5">
-          {FORMATS.map((fmt) => (
-            <label
-              key={fmt.id}
-              className={cn(
-                "flex items-start gap-3 rounded-md border px-3 py-2.5 cursor-pointer transition-colors",
-                selectedFormat === fmt.id
-                  ? "border-accent-teal bg-accent-teal/10 text-text-primary"
-                  : "border-border hover:border-border-hover text-text-secondary"
-              )}
-            >
-              <input
-                type="radio"
-                name="format"
-                value={fmt.id}
-                checked={selectedFormat === fmt.id}
-                onChange={() => setSelectedFormat(fmt.id)}
-                className="mt-0.5 accent-teal-500"
-              />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  {fmt.icon}
-                  <span>{fmt.label}</span>
-                  <span className="text-xs text-text-muted font-mono">{fmt.ext}</span>
+        <div className="flex flex-col gap-2">
+          {FORMATS.map((fmt) => {
+            const selected = selectedFormat === fmt.id;
+            return (
+              <button
+                key={fmt.id}
+                type="button"
+                onClick={() => setSelectedFormat(fmt.id)}
+                aria-pressed={selected}
+                className={cn(
+                  "flex items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                  selected
+                    ? "border-primary bg-primary/10 text-foreground"
+                    : "border-border text-muted-foreground hover:bg-muted",
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    {fmt.icon}
+                    <span>{fmt.label}</span>
+                    <span className="font-mono text-xs text-muted-foreground">{fmt.ext}</span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{fmt.description}</p>
                 </div>
-                <p className="text-xs text-text-muted mt-0.5">{fmt.description}</p>
-              </div>
-            </label>
-          ))}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Actions */}
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="btn-ghost text-sm px-4 py-1.5">
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            onClick={handleExport}
-            disabled={isExporting}
-            className="btn-primary text-sm px-4 py-1.5 flex items-center gap-2"
-          >
-            {isExporting ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Download size={14} />
-            )}
+          </Button>
+          <Button onClick={handleExport} disabled={isExporting}>
+            {isExporting ? <Loader2 className="animate-spin" /> : <Download />}
             {isExporting ? "Exporting…" : "Export"}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

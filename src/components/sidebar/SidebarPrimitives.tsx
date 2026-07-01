@@ -2,13 +2,17 @@ import React from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "../../utils/formatters";
 import { DatabaseType } from "../../models/database";
+import { DATABASE_PROVIDERS } from "../../models/databaseProviders";
+import { Button } from "@/components/ui/button";
 
-// ─── Per-DB-type visual metadata ─────────────────────────────────────────────
-export const DB_META: Record<DatabaseType, { label: string; color: string }> = {
-  sqlite:   { label: "SQLite",   color: "text-blue-400" },
-  mysql:    { label: "MySQL",    color: "text-amber-400" },
-  postgres: { label: "Postgres", color: "text-emerald-400" },
-};
+// ─── Per-DB-type visual metadata (derived from the provider registry) ────────
+export const DB_META: Record<DatabaseType, { label: string; color: string }> =
+  Object.fromEntries(
+    Object.entries(DATABASE_PROVIDERS).map(([type, p]) => [
+      type,
+      { label: p.label, color: p.color },
+    ]),
+  ) as Record<DatabaseType, { label: string; color: string }>;
 
 // ─── IconBtn ──────────────────────────────────────────────────────────────────
 
@@ -23,22 +27,23 @@ export interface IconBtnProps {
 
 export function IconBtn({ onClick, title, icon, variant = "default", className, disabled = false }: IconBtnProps) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-xs"
       onClick={onClick}
       title={title}
+      aria-label={title}
       disabled={disabled}
       className={cn(
-        "p-0.5 rounded transition-colors",
-        variant === "blue"    && "text-text-muted hover:text-accent-blue hover:bg-accent-blue/10",
-        variant === "red"     && "text-text-muted hover:text-accent-red  hover:bg-accent-red/10",
-        variant === "default" && "text-text-muted hover:text-text-primary hover:bg-surface-4",
-        disabled && "opacity-40 cursor-not-allowed hover:bg-transparent hover:text-text-muted",
+        "text-muted-foreground",
+        variant === "blue" && "hover:text-primary",
+        variant === "red" && "hover:text-destructive",
         className,
       )}
     >
       {icon}
-    </button>
+    </Button>
   );
 }
 
@@ -51,16 +56,13 @@ export interface EmptyStateProps {
 
 export function EmptyState({ message, action }: EmptyStateProps) {
   return (
-    <div className="px-4 py-4 space-y-2">
-      <p className="text-[11px] text-text-muted leading-relaxed">{message}</p>
+    <div className="space-y-2 px-4 py-4">
+      <p className="text-[11px] leading-relaxed text-muted-foreground">{message}</p>
       {action && (
-        <button
-          onClick={action.onClick}
-          className="btn-ghost text-xs flex items-center gap-1.5 py-1 px-2"
-        >
+        <Button variant="ghost" size="sm" onClick={action.onClick} className="text-xs">
           {action.icon}
           {action.label}
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -96,37 +98,41 @@ export function SectionHeader({
 }: SectionHeaderProps) {
   return (
     <div
-      className="group flex-shrink-0 flex items-center h-7 px-2 cursor-pointer select-none hover:bg-surface-3/60 transition-colors"
+      className="group flex h-7 flex-shrink-0 cursor-pointer select-none items-center px-2 transition-colors hover:bg-muted"
       onClick={onToggle}
     >
-      <span className="text-text-muted mr-1">
+      <span className="mr-1 text-muted-foreground">
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
       </span>
-      <span className="flex-1 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+      <span className="flex-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
       {count !== undefined && (
-        <span className="text-[10px] text-text-muted font-mono opacity-50 mr-1">{count}</span>
+        <span className="mr-1 font-mono text-[10px] text-muted-foreground opacity-50">{count}</span>
       )}
       {secondaryAction && (
         <button
+          type="button"
           onClick={(e) => { e.stopPropagation(); secondaryAction.onClick(); }}
-          className="p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity text-text-muted hover:text-text-primary hover:bg-surface-4 mr-0.5"
+          className="mr-0.5 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-1 focus-visible:outline-ring group-hover:opacity-100"
           title={secondaryAction.title}
+          aria-label={secondaryAction.title}
         >
           {secondaryAction.icon}
         </button>
       )}
       {primaryAction && (
         <button
+          type="button"
           onClick={(e) => { e.stopPropagation(); primaryAction.onClick(); }}
           className={cn(
-            "p-0.5 rounded transition-opacity",
+            "rounded p-0.5 transition-opacity focus-visible:outline-1 focus-visible:outline-ring",
             primaryAction.active
-              ? "text-accent-blue bg-accent-blue/10 opacity-100"
-              : "opacity-0 group-hover:opacity-100 text-text-muted hover:text-text-primary hover:bg-surface-4",
+              ? "bg-primary/10 text-primary opacity-100"
+              : "text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
           )}
           title={primaryAction.title}
+          aria-label={primaryAction.title}
         >
           {primaryAction.icon}
         </button>

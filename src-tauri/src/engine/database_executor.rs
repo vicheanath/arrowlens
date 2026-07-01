@@ -2,23 +2,25 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use sqlx::postgres::PgPoolOptions;
-use sqlx::sqlite::SqlitePoolOptions;
-use sqlx::{AnyPool, Column, Executor, Row, Statement, TypeInfo};
 use tauri::{AppHandle, Emitter};
 
-use crate::engine::database_registry::{DatabaseConnectionInfo, DatabaseRegistry, DatabaseType};
+use crate::engine::database_registry::{DatabaseConnectionInfo, DatabaseRegistry};
+use crate::engine::provider::{emit_stream, provider_for, DatabaseProvider};
 use crate::engine::query_executor::QueryExecutor;
 use crate::error::{AppError, Result};
 use crate::state::active_queries;
-use crate::streaming::cell_serializer::{any_cell_to_json, pg_cell_to_json, sqlite_cell_to_json};
-use crate::streaming::record_batch_stream::StreamChunk;
-use crate::streaming::result_serializer::QueryResult;
+use crate::streaming::result_serializer::{QueryResult, MAX_RESULT_ROWS};
 
+/// Maximum rows materialized for a non-streaming query (shared across every
+/// execution path).
+const MAX_COLLECTED_ROWS: usize = MAX_RESULT_ROWS;
+
+/// Adapts a [`DatabaseProvider`] to the [`QueryExecutor`] interface. All
+/// engine-specific behavior lives in the provider; this type only orchestrates.
 pub struct DatabaseExecutor {
     registry: Arc<DatabaseRegistry>,
     connection_id: String,
-    info: DatabaseConnectionInfo,
+    provider: Box<dyn DatabaseProvider>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -40,7 +42,11 @@ impl DatabaseExecutor {
         connection_id: String,
         info: DatabaseConnectionInfo,
     ) -> Self {
-        Self { registry, connection_id, info }
+        Self {
+            provider: provider_for(info.database_type),
+            registry,
+            connection_id,
+        }
     }
 
     pub fn from_registry(registry: Arc<DatabaseRegistry>, connection_id: &str) -> Result<Self> {
@@ -50,50 +56,21 @@ impl DatabaseExecutor {
         Ok(Self::new(registry, connection_id.to_string(), info))
     }
 
-    async fn get_pool(&self) -> Result<AnyPool> {
-        self.registry.get_or_create_pool(&self.connection_id).await
-    }
-
     pub async fn list_schema_tree(&self) -> Result<Vec<DatabaseSchemaEntry>> {
-        let pool = self.get_pool().await?;
-
-        let sql = match self.info.database_type {
-            DatabaseType::Sqlite => {
-                "SELECT 'main' AS schema_name, name AS table_name \
-                 FROM sqlite_master \
-                 WHERE type='table' AND name NOT LIKE 'sqlite_%' \
-                 ORDER BY name"
-            }
-            DatabaseType::Mysql => {
-                "SELECT table_schema AS schema_name, table_name \
-                 FROM information_schema.tables \
-                 WHERE table_schema = DATABASE() \
-                     AND table_type IN ('BASE TABLE', 'VIEW') \
-                 ORDER BY table_schema, table_name"
-            }
-            DatabaseType::Postgres => {
-                "SELECT table_schema::text AS schema_name, table_name::text AS table_name \
-                 FROM information_schema.tables \
-                 WHERE table_schema NOT IN ('pg_catalog', 'information_schema') \
-                     AND table_type IN ('BASE TABLE', 'VIEW', 'FOREIGN') \
-                 ORDER BY table_schema, table_name"
-            }
-        };
-
-        let rows = sqlx::query(sql)
-            .fetch_all(&pool)
-            .await
-            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
+        let decoded = self
+            .provider
+            .fetch(
+                &self.registry,
+                &self.connection_id,
+                self.provider.schema_tree_sql(),
+                None,
+            )
+            .await?;
 
         let mut schemas: Vec<DatabaseSchemaEntry> = Vec::new();
-
-        for row in rows {
-            let schema_name = row
-                .try_get::<String, _>(0)
-                .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
-            let table_name = row
-                .try_get::<String, _>(1)
-                .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
+        for row in &decoded.rows {
+            let schema_name = json_to_string(row.first());
+            let table_name = json_to_string(row.get(1));
 
             let schema_index = schemas
                 .iter()
@@ -116,459 +93,62 @@ impl DatabaseExecutor {
         Ok(schemas)
     }
 
-    pub async fn list_tables(&self) -> Result<Vec<String>> {
-        let schemas = self.list_schema_tree().await?;
-        let mut tables = Vec::new();
+    /// Fetch the full result set (no row cap) — used for export, where
+    /// truncating to the display limit would silently drop data.
+    pub async fn fetch_all(&self, sql: &str) -> Result<QueryResult> {
+        let started = Instant::now();
+        let decoded = self
+            .provider
+            .fetch(&self.registry, &self.connection_id, sql, None)
+            .await?;
+        Ok(decoded.into_query_result(started.elapsed().as_millis() as u64))
+    }
 
+    pub async fn list_tables(&self) -> Result<Vec<String>> {
+        let qualify = self.provider.qualifies_table_names();
+        let schemas = self.list_schema_tree().await?;
+
+        let mut tables = Vec::new();
         for schema in schemas {
             for table in schema.tables {
-                if self.info.database_type == DatabaseType::Sqlite {
-                    tables.push(table.name);
-                } else {
-                    tables.push(table.full_name);
-                }
+                tables.push(if qualify { table.full_name } else { table.name });
             }
         }
-
         Ok(tables)
-    }
-
-    pub async fn validate_connection_string(connection_string: &str) -> Result<()> {
-        use sqlx::any::AnyPoolOptions;
-        let pool = AnyPoolOptions::new()
-            .max_connections(1)
-            .connect(connection_string)
-            .await
-            .map_err(|e| AppError::DatabaseConnectionError(e.to_string()))?;
-        pool.close().await;
-        Ok(())
-    }
-
-    async fn execute_sqlite(&self, sql: &str) -> Result<QueryResult> {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(&self.info.connection_string)
-            .await
-            .map_err(|e| AppError::DatabaseConnectionError(e.to_string()))?;
-        let started = Instant::now();
-
-        let statement = pool
-            .prepare(sql)
-            .await
-            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
-
-        let rows = sqlx::query(sql)
-            .fetch_all(&pool)
-            .await
-            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
-
-        let clipped = rows.into_iter().take(10_000).collect::<Vec<_>>();
-        let (columns, column_types): (Vec<String>, Vec<String>) = if let Some(first) = clipped.first() {
-            let cols = first
-                .columns()
-                .iter()
-                .map(|c| c.name().to_string())
-                .collect::<Vec<String>>();
-            let types = first
-                .columns()
-                .iter()
-                .map(|c| c.type_info().name().to_string())
-                .collect::<Vec<String>>();
-            (cols, types)
-        } else {
-            let cols = statement
-                .columns()
-                .iter()
-                .map(|c| c.name().to_string())
-                .collect::<Vec<String>>();
-            let types = statement
-                .columns()
-                .iter()
-                .map(|c| c.type_info().name().to_string())
-                .collect::<Vec<String>>();
-            (cols, types)
-        };
-
-        let mut rows_out: Vec<Vec<serde_json::Value>> = Vec::with_capacity(clipped.len());
-        for row in &clipped {
-            let mut out = Vec::with_capacity(row.len());
-            for idx in 0..row.len() {
-                out.push(sqlite_cell_to_json(row, idx));
-            }
-            rows_out.push(out);
-        }
-
-        pool.close().await;
-        Ok(QueryResult {
-            columns,
-            column_types,
-            row_count: rows_out.len(),
-            rows: rows_out,
-            elapsed_ms: started.elapsed().as_millis() as u64,
-        })
-    }
-
-    async fn execute_streaming_sqlite(
-        &self,
-        app: AppHandle,
-        query_id: String,
-        sql: &str,
-        chunk_size: usize,
-    ) -> Result<()> {
-        if active_queries::is_cancelled(&query_id) {
-            let _ = app.emit(
-                &format!("query-error-{}", query_id),
-                AppError::QueryCancelled.to_response(Some(sql.to_string())),
-            );
-            return Ok(());
-        }
-
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(&self.info.connection_string)
-            .await
-            .map_err(|e| AppError::DatabaseConnectionError(e.to_string()))?;
-
-        let statement = pool
-            .prepare(sql)
-            .await
-            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
-
-        let rows = sqlx::query(sql)
-            .fetch_all(&pool)
-            .await
-            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
-
-        let (columns, _column_types): (Vec<String>, Vec<String>) = if let Some(first) = rows.first() {
-            let cols = first
-                .columns()
-                .iter()
-                .map(|c| c.name().to_string())
-                .collect::<Vec<_>>();
-            let types = first
-                .columns()
-                .iter()
-                .map(|c| c.type_info().name().to_string())
-                .collect::<Vec<_>>();
-            (cols, types)
-        } else {
-            let cols = statement
-                .columns()
-                .iter()
-                .map(|c| c.name().to_string())
-                .collect::<Vec<_>>();
-            let types = statement
-                .columns()
-                .iter()
-                .map(|c| c.type_info().name().to_string())
-                .collect::<Vec<_>>();
-            (cols, types)
-        };
-
-        let mut chunk_index = 0usize;
-        for chunk in rows.chunks(chunk_size) {
-            if active_queries::is_cancelled(&query_id) {
-                let _ = app.emit(
-                    &format!("query-chunk-{}", query_id),
-                    StreamChunk {
-                        query_id: query_id.clone(),
-                        chunk_index,
-                        columns: columns.clone(),
-                        rows: vec![],
-                        row_count: 0,
-                        done: true,
-                    },
-                );
-                pool.close().await;
-                return Ok(());
-            }
-
-            let mut rows_json = Vec::with_capacity(chunk.len());
-            for row in chunk {
-                let mut row_vals = Vec::with_capacity(columns.len());
-                for idx in 0..columns.len() {
-                    row_vals.push(sqlite_cell_to_json(row, idx));
-                }
-                rows_json.push(row_vals);
-            }
-
-            let _ = app.emit(
-                &format!("query-chunk-{}", query_id),
-                StreamChunk {
-                    query_id: query_id.clone(),
-                    chunk_index,
-                    columns: columns.clone(),
-                    row_count: rows_json.len(),
-                    rows: rows_json,
-                    done: false,
-                },
-            );
-            chunk_index += 1;
-        }
-
-        let _ = app.emit(
-            &format!("query-chunk-{}", query_id),
-            StreamChunk {
-                query_id,
-                chunk_index,
-                columns,
-                rows: vec![],
-                row_count: 0,
-                done: true,
-            },
-        );
-
-        pool.close().await;
-        Ok(())
-    }
-
-    async fn execute_postgres(&self, sql: &str) -> Result<QueryResult> {
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect(&self.info.connection_string)
-            .await
-            .map_err(|e| AppError::DatabaseConnectionError(e.to_string()))?;
-        let started = Instant::now();
-
-        let statement = pool
-            .prepare(sql)
-            .await
-            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
-
-        let rows = sqlx::query(sql)
-            .fetch_all(&pool)
-            .await
-            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
-
-        let clipped = rows.into_iter().take(10_000).collect::<Vec<_>>();
-
-        let (columns, column_types): (Vec<String>, Vec<String>) = if let Some(first) = clipped.first() {
-            let cols = first
-                .columns()
-                .iter()
-                .map(|c| c.name().to_string())
-                .collect::<Vec<String>>();
-            let types = first
-                .columns()
-                .iter()
-                .map(|c| c.type_info().name().to_string())
-                .collect::<Vec<String>>();
-            (cols, types)
-        } else {
-            let cols = statement
-                .columns()
-                .iter()
-                .map(|c| c.name().to_string())
-                .collect::<Vec<String>>();
-            let types = statement
-                .columns()
-                .iter()
-                .map(|c| c.type_info().name().to_string())
-                .collect::<Vec<String>>();
-            (cols, types)
-        };
-
-        let mut rows_out: Vec<Vec<serde_json::Value>> = Vec::with_capacity(clipped.len());
-        for row in &clipped {
-            let mut out = Vec::with_capacity(row.len());
-            for idx in 0..row.len() {
-                out.push(pg_cell_to_json(row, idx));
-            }
-            rows_out.push(out);
-        }
-
-        pool.close().await;
-        Ok(QueryResult {
-            columns,
-            column_types,
-            row_count: rows_out.len(),
-            rows: rows_out,
-            elapsed_ms: started.elapsed().as_millis() as u64,
-        })
-    }
-
-    async fn execute_streaming_postgres(
-        &self,
-        app: AppHandle,
-        query_id: String,
-        sql: &str,
-        chunk_size: usize,
-    ) -> Result<()> {
-        if active_queries::is_cancelled(&query_id) {
-            let _ = app.emit(
-                &format!("query-error-{}", query_id),
-                AppError::QueryCancelled.to_response(Some(sql.to_string())),
-            );
-            return Ok(());
-        }
-
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect(&self.info.connection_string)
-            .await
-            .map_err(|e| AppError::DatabaseConnectionError(e.to_string()))?;
-
-        let statement = pool
-            .prepare(sql)
-            .await
-            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
-
-        let rows = sqlx::query(sql)
-            .fetch_all(&pool)
-            .await
-            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
-
-        let (columns, _column_types): (Vec<String>, Vec<String>) = if let Some(first) = rows.first() {
-            let cols = first
-                .columns()
-                .iter()
-                .map(|c| c.name().to_string())
-                .collect::<Vec<_>>();
-            let types = first
-                .columns()
-                .iter()
-                .map(|c| c.type_info().name().to_string())
-                .collect::<Vec<_>>();
-            (cols, types)
-        } else {
-            let cols = statement
-                .columns()
-                .iter()
-                .map(|c| c.name().to_string())
-                .collect::<Vec<_>>();
-            let types = statement
-                .columns()
-                .iter()
-                .map(|c| c.type_info().name().to_string())
-                .collect::<Vec<_>>();
-            (cols, types)
-        };
-
-        let mut chunk_index = 0usize;
-        for chunk in rows.chunks(chunk_size) {
-            if active_queries::is_cancelled(&query_id) {
-                let _ = app.emit(
-                    &format!("query-chunk-{}", query_id),
-                    StreamChunk {
-                        query_id: query_id.clone(),
-                        chunk_index,
-                        columns: columns.clone(),
-                        rows: vec![],
-                        row_count: 0,
-                        done: true,
-                    },
-                );
-                pool.close().await;
-                return Ok(());
-            }
-
-            let mut rows_json = Vec::with_capacity(chunk.len());
-            for row in chunk {
-                let mut row_vals = Vec::with_capacity(columns.len());
-                for idx in 0..columns.len() {
-                    row_vals.push(pg_cell_to_json(row, idx));
-                }
-                rows_json.push(row_vals);
-            }
-
-            let _ = app.emit(
-                &format!("query-chunk-{}", query_id),
-                StreamChunk {
-                    query_id: query_id.clone(),
-                    chunk_index,
-                    columns: columns.clone(),
-                    row_count: rows_json.len(),
-                    rows: rows_json,
-                    done: false,
-                },
-            );
-            chunk_index += 1;
-        }
-
-        let _ = app.emit(
-            &format!("query-chunk-{}", query_id),
-            StreamChunk {
-                query_id,
-                chunk_index,
-                columns,
-                rows: vec![],
-                row_count: 0,
-                done: true,
-            },
-        );
-
-        pool.close().await;
-        Ok(())
     }
 }
 
 #[async_trait]
 impl QueryExecutor for DatabaseExecutor {
     async fn execute(&self, sql: &str) -> Result<QueryResult> {
-        if self.info.database_type == DatabaseType::Sqlite {
-            return self.execute_sqlite(sql).await;
-        }
-        if self.info.database_type == DatabaseType::Postgres {
-            return self.execute_postgres(sql).await;
-        }
-
-        let pool = self.get_pool().await?;
         let started = Instant::now();
-
-        let statement = pool
-            .prepare(sql)
-            .await
-            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
-
-        let rows = sqlx::query(sql)
-            .fetch_all(&pool)
-            .await
-            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
-
-        let clipped = rows.into_iter().take(10_000).collect::<Vec<_>>();
-
-        let (columns, column_types): (Vec<String>, Vec<String>) = if let Some(first) = clipped.first() {
-            let cols = first
-                .columns()
-                .iter()
-                .map(|c| c.name().to_string())
-                .collect::<Vec<String>>();
-            let types = first
-                .columns()
-                .iter()
-                .map(|c| c.type_info().name().to_string())
-                .collect::<Vec<String>>();
-            (cols, types)
-        } else {
-            let cols = statement
-                .columns()
-                .iter()
-                .map(|c| c.name().to_string())
-                .collect::<Vec<String>>();
-            let types = statement
-                .columns()
-                .iter()
-                .map(|c| c.type_info().name().to_string())
-                .collect::<Vec<String>>();
-            (cols, types)
-        };
-
-        let mut rows_out: Vec<Vec<serde_json::Value>> = Vec::with_capacity(clipped.len());
-        for row in &clipped {
-            let mut out = Vec::with_capacity(row.len());
-            for idx in 0..row.len() {
-                out.push(any_cell_to_json(row, idx));
-            }
-            rows_out.push(out);
+        // Fetch one extra row so we can tell whether the result was capped.
+        let mut decoded = self
+            .provider
+            .fetch(
+                &self.registry,
+                &self.connection_id,
+                sql,
+                Some(MAX_COLLECTED_ROWS + 1),
+            )
+            .await?;
+        let truncated = decoded.rows.len() > MAX_COLLECTED_ROWS;
+        if truncated {
+            decoded.rows.truncate(MAX_COLLECTED_ROWS);
         }
+        let mut result = decoded.into_query_result(started.elapsed().as_millis() as u64);
+        result.truncated = truncated;
+        Ok(result)
+    }
 
-        Ok(QueryResult {
-            columns,
-            column_types,
-            row_count: rows_out.len(),
-            rows: rows_out,
-            elapsed_ms: started.elapsed().as_millis() as u64,
-        })
+    async fn execute_page(&self, sql: &str, offset: usize, limit: usize) -> Result<QueryResult> {
+        let started = Instant::now();
+        let paged_sql = self.provider.page_wrap(sql, offset, limit);
+        let decoded = self
+            .provider
+            .fetch(&self.registry, &self.connection_id, &paged_sql, Some(limit))
+            .await?;
+        Ok(decoded.into_query_result(started.elapsed().as_millis() as u64))
     }
 
     async fn execute_streaming(
@@ -578,17 +158,6 @@ impl QueryExecutor for DatabaseExecutor {
         sql: &str,
         chunk_size: usize,
     ) -> Result<()> {
-        if self.info.database_type == DatabaseType::Sqlite {
-            return self
-                .execute_streaming_sqlite(app, query_id, sql, chunk_size)
-                .await;
-        }
-        if self.info.database_type == DatabaseType::Postgres {
-            return self
-                .execute_streaming_postgres(app, query_id, sql, chunk_size)
-                .await;
-        }
-
         if active_queries::is_cancelled(&query_id) {
             let _ = app.emit(
                 &format!("query-error-{}", query_id),
@@ -597,95 +166,68 @@ impl QueryExecutor for DatabaseExecutor {
             return Ok(());
         }
 
-        let pool = self.get_pool().await?;
-        let statement = pool
-            .prepare(sql)
-            .await
-            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
-
-        let rows = sqlx::query(sql)
-            .fetch_all(&pool)
-            .await
-            .map_err(|e| AppError::DatabaseQueryError(e.to_string()))?;
-
-        let (columns, _column_types): (Vec<String>, Vec<String>) = if let Some(first) = rows.first() {
-            let cols = first
-                .columns()
-                .iter()
-                .map(|c| c.name().to_string())
-                .collect::<Vec<_>>();
-            let types = first
-                .columns()
-                .iter()
-                .map(|c| c.type_info().name().to_string())
-                .collect::<Vec<_>>();
-            (cols, types)
-        } else {
-            let cols = statement
-                .columns()
-                .iter()
-                .map(|c| c.name().to_string())
-                .collect::<Vec<_>>();
-            let types = statement
-                .columns()
-                .iter()
-                .map(|c| c.type_info().name().to_string())
-                .collect::<Vec<_>>();
-            (cols, types)
-        };
-
-        let mut chunk_index = 0usize;
-        for chunk in rows.chunks(chunk_size) {
-            if active_queries::is_cancelled(&query_id) {
-                let _ = app.emit(
-                    &format!("query-chunk-{}", query_id),
-                    StreamChunk {
-                        query_id: query_id.clone(),
-                        chunk_index,
-                        columns: columns.clone(),
-                        rows: vec![],
-                        row_count: 0,
-                        done: true,
-                    },
-                );
-                return Ok(());
-            }
-
-            let mut rows_json = Vec::with_capacity(chunk.len());
-            for row in chunk {
-                let mut row_vals = Vec::with_capacity(columns.len());
-                for idx in 0..columns.len() {
-                    row_vals.push(any_cell_to_json(row, idx));
-                }
-                rows_json.push(row_vals);
-            }
-
-            let _ = app.emit(
-                &format!("query-chunk-{}", query_id),
-                StreamChunk {
-                    query_id: query_id.clone(),
-                    chunk_index,
-                    columns: columns.clone(),
-                    row_count: rows_json.len(),
-                    rows: rows_json,
-                    done: false,
-                },
-            );
-            chunk_index += 1;
-        }
-
-        let _ = app.emit(
-            &format!("query-chunk-{}", query_id),
-            StreamChunk {
-                query_id,
-                chunk_index,
-                columns,
-                rows: vec![],
-                row_count: 0,
-                done: true,
-            },
-        );
-
+        let decoded = self
+            .provider
+            .fetch(&self.registry, &self.connection_id, sql, None)
+            .await?;
+        emit_stream(&app, &query_id, decoded, chunk_size);
         Ok(())
+    }
+}
+
+/// Coerce a JSON cell from a schema-listing query into a plain string.
+fn json_to_string(value: Option<&serde_json::Value>) -> String {
+    match value {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Null) | None => String::new(),
+        Some(other) => other.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::engine::provider::{DatabaseProvider, MssqlProvider, SqliteProvider};
+
+    // The default `page_wrap` (LIMIT/OFFSET) is shared by SQLite/MySQL/Postgres;
+    // SqliteProvider exercises it.
+    fn wrap_paged(sql: &str, offset: usize, limit: usize) -> String {
+        SqliteProvider.page_wrap(sql, offset, limit)
+    }
+
+    #[test]
+    fn wraps_basic_select_with_window() {
+        let out = wrap_paged("SELECT * FROM users", 1000, 500);
+        assert_eq!(
+            out,
+            "SELECT * FROM (\nSELECT * FROM users\n) AS _arrowlens_page LIMIT 500 OFFSET 1000"
+        );
+    }
+
+    #[test]
+    fn strips_trailing_semicolon_and_whitespace() {
+        let out = wrap_paged("  SELECT 1 ;  ", 0, 100);
+        assert!(out.contains("(\nSELECT 1\n)"), "got: {out}");
+        assert!(out.ends_with("LIMIT 100 OFFSET 0"));
+    }
+
+    #[test]
+    fn trailing_line_comment_stays_inside_the_subquery() {
+        // The newline before `)` must keep a trailing `--` comment from
+        // swallowing the closing paren.
+        let out = wrap_paged("SELECT 1 -- note", 0, 10);
+        assert!(out.contains("-- note\n)"), "got: {out}");
+    }
+
+    #[test]
+    fn mssql_pages_with_offset_fetch() {
+        // SQL Server has no LIMIT/OFFSET — it must use OFFSET..ROWS FETCH NEXT,
+        // and OFFSET..FETCH requires an ORDER BY (we supply a stable no-op one).
+        let out = MssqlProvider.page_wrap("SELECT * FROM users", 1000, 500);
+        assert!(out.contains("ORDER BY (SELECT NULL)"), "got: {out}");
+        assert!(
+            out.ends_with("OFFSET 1000 ROWS FETCH NEXT 500 ROWS ONLY"),
+            "got: {out}"
+        );
+        assert!(!out.contains("LIMIT"), "got: {out}");
     }
 }

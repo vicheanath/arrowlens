@@ -57,7 +57,7 @@ export function ExplainPanel({ explainPlan, isExplaining, onRerun }: ExplainPane
 
   return (
     <div className="h-full flex flex-col min-h-0">
-      <div className="flex-shrink-0 border-b border-border/70 px-3 py-2 bg-surface-2">
+      <div className="flex-shrink-0 border-b border-border/70 px-3 py-2 bg-card">
         <ExplainToolbar
           flavor={flavor}
           isExplaining={isExplaining}

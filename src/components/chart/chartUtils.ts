@@ -1,5 +1,33 @@
 import { cellToString } from "../../utils/formatters";
+import { getTypeCategory } from "../../models/dataset";
 import { AggregateMode, ChartDatum, SortMode } from "./chartTypes";
+
+/**
+ * Decide which columns are numeric using both the declared type (when known)
+ * and a sample of the actual data. The data check makes this robust for
+ * streaming results (no types) and SQL type names alike.
+ */
+export function detectNumericColumns(
+  rows: unknown[][],
+  columns: string[],
+  columnTypes: string[],
+): string[] {
+  const sample = rows.slice(0, 50);
+  return columns.filter((_, i) => {
+    const declared = columnTypes[i];
+    if (declared && getTypeCategory(declared) === "numeric") return true;
+
+    let numeric = 0;
+    let total = 0;
+    for (const row of sample) {
+      const value = row[i];
+      if (value === null || value === undefined || value === "") continue;
+      total += 1;
+      if (toFiniteNumber(value) !== null) numeric += 1;
+    }
+    return total > 0 && numeric / total >= 0.8;
+  });
+}
 
 export function toFiniteNumber(value: unknown): number | null {
   if (typeof value === "number") {

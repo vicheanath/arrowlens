@@ -1,4 +1,5 @@
 import { DatabaseType } from "../models/database";
+import { getDatabaseProvider } from "../models/databaseProviders";
 
 export type SqlDialect = "datafusion" | DatabaseType;
 
@@ -39,17 +40,76 @@ export function formatSql(sql: string): string {
   return result.trim();
 }
 
-export function getDialectLabel(dialect: SqlDialect): string {
-  switch (dialect) {
-    case "sqlite":
-      return "SQLite";
-    case "mysql":
-      return "MySQL";
-    case "postgres":
-      return "PostgreSQL";
-    default:
-      return "DataFusion";
+/** SQL leading keywords that modify data or schema. */
+const WRITE_KEYWORDS = new Set([
+  "insert", "update", "delete", "merge", "replace", "upsert",
+  "drop", "alter", "create", "truncate", "rename",
+  "grant", "revoke", "vacuum", "reindex",
+  "call", "copy", "attach", "detach", "comment",
+]);
+
+/**
+ * Lightweight statement splitter for classification only: strips line/block
+ * comments and splits on `;` outside string literals. Not a full parser.
+ */
+function splitStatementsLite(sql: string): string[] {
+  const out: string[] = [];
+  let current = "";
+  let state: "normal" | "single" | "double" | "line" | "block" = "normal";
+  let i = 0;
+  while (i < sql.length) {
+    const c = sql[i];
+    const next = sql[i + 1];
+    if (state === "normal") {
+      if (c === "'") { state = "single"; current += c; }
+      else if (c === '"') { state = "double"; current += c; }
+      else if (c === "-" && next === "-") { state = "line"; i += 2; continue; }
+      else if (c === "/" && next === "*") { state = "block"; i += 2; continue; }
+      else if (c === ";") { out.push(current); current = ""; }
+      else current += c;
+    } else if (state === "single") {
+      current += c;
+      if (c === "'") state = "normal";
+    } else if (state === "double") {
+      current += c;
+      if (c === '"') state = "normal";
+    } else if (state === "line") {
+      if (c === "\n") { state = "normal"; current += c; }
+    } else if (state === "block") {
+      if (c === "*" && next === "/") { state = "normal"; i += 2; continue; }
+    }
+    i += 1;
   }
+  out.push(current);
+  return out.map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Detect whether a SQL script contains statements that modify data or schema,
+ * for a destructive-action confirmation gate. Heuristic (leading keyword per
+ * statement) — errs toward prompting; a `WITH ... DELETE` CTE is a known blind
+ * spot.
+ */
+export function classifyWriteSql(sql: string): { isWrite: boolean; kinds: string[] } {
+  const kinds = new Set<string>();
+  for (const stmt of splitStatementsLite(sql)) {
+    const match = stmt.replace(/^[\s(]+/, "").match(/^([a-zA-Z]+)/);
+    if (!match) continue;
+    const keyword = match[1].toLowerCase();
+    if (WRITE_KEYWORDS.has(keyword)) kinds.add(keyword.toUpperCase());
+  }
+  return { isWrite: kinds.size > 0, kinds: Array.from(kinds) };
+}
+
+/** True when `sql` contains exactly one (non-empty) statement. Used to decide
+ * whether a query can be lazily paginated (only single statements can). */
+export function isSingleStatement(sql: string): boolean {
+  return splitStatementsLite(sql).filter((stmt) => stmt.trim().length > 0).length <= 1;
+}
+
+export function getDialectLabel(dialect: SqlDialect): string {
+  if (dialect === "datafusion") return "DataFusion";
+  return getDatabaseProvider(dialect).dialectLabel;
 }
 
 export function getDefaultSqlForDialect(dialect: SqlDialect): string {
@@ -80,11 +140,18 @@ export function quoteIdentifier(
   identifier: string,
   dialect: SqlDialect = "datafusion",
 ): string {
+  const quoteStyle =
+    dialect === "datafusion" ? "double" : getDatabaseProvider(dialect).identifierQuote;
+
   const quotePart = (part: string): string => {
-    if (dialect === "mysql") {
-      return `\`${part.replace(/`/g, "``")}\``;
+    switch (quoteStyle) {
+      case "backtick":
+        return `\`${part.replace(/`/g, "``")}\``;
+      case "bracket":
+        return `[${part.replace(/]/g, "]]")}]`;
+      default:
+        return `"${part.replace(/"/g, '""')}"`;
     }
-    return `"${part.replace(/"/g, '""')}"`;
   };
 
   // Support qualified identifiers such as schema.table and db.schema.table.

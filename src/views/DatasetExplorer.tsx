@@ -40,6 +40,7 @@ export function DatasetExplorer() {
     selectedConnectionId,
     tablesByConnection,
     schemaTreeByConnection,
+    schemaDetailByConnection,
     isLoadingTables,
     handleConnectionSelect,
     toggleConnectionExpanded,
@@ -63,7 +64,7 @@ export function DatasetExplorer() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-surface-1 select-none">
+    <div className="flex flex-col h-full overflow-hidden bg-card select-none">
 
       {/* ══════ DATASETS section ══════ */}
       <SectionHeader
@@ -116,7 +117,7 @@ export function DatasetExplorer() {
       {connectionsOpen && (
         <div className="flex-1 overflow-y-auto min-h-0">
           {dbError && (
-            <div className="mx-2 my-1 px-2 py-1 text-[11px] text-accent-red bg-accent-red/10 rounded border border-accent-red/20">
+            <div className="mx-2 my-1 px-2 py-1 text-[11px] text-destructive bg-destructive/10 rounded border border-destructive/20">
               {dbError}
             </div>
           )}
@@ -140,13 +141,14 @@ export function DatasetExplorer() {
             selectedConnectionId={selectedConnectionId}
             tablesByConnection={tablesByConnection}
             schemaTreeByConnection={schemaTreeByConnection}
+            schemaDetailByConnection={schemaDetailByConnection}
             isLoadingTables={isLoadingTables}
             expandedIds={expandedConnections}
             onSelectConnection={handleConnectionSelect}
             onToggleExpanded={toggleConnectionExpanded}
             onRefreshTables={id => refreshTables(id)}
             onDisconnect={id => disconnectDatabase(id)}
-            onTableQuery={tableName => { void handleTableQuery(tableName); }}
+            onTableQuery={(connectionId, tableName) => { void handleTableQuery(connectionId, tableName); }}
             onAddConnection={() => { setAddingConnection(true); setConnectionsOpen(true); }}
             canQueryConnection={canQueryConnection}
             canInspectTablesConnection={canInspectTablesConnection}
@@ -156,9 +158,9 @@ export function DatasetExplorer() {
 
       {/* ══════ DATASET INFO footer ══════ */}
       {selectedDataset && (
-        <div className="flex-shrink-0 border-t border-border/50 bg-surface-2 px-3 py-2.5">
+        <div className="flex-shrink-0 border-t border-border/50 bg-card px-3 py-2.5">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Dataset Info</span>
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Dataset Info</span>
             <IconBtn
               onClick={() => removeDataset(selectedDataset.id)}
               title="Remove dataset"
@@ -166,16 +168,16 @@ export function DatasetExplorer() {
               variant="red"
             />
           </div>
-          <div className="text-xs text-text-secondary font-medium truncate mb-2">{selectedDataset.name}</div>
+          <div className="text-xs text-foreground/80 font-medium truncate mb-2">{selectedDataset.name}</div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] mb-2.5">
-            <span className="text-text-muted">Type</span>
-            <span className="text-text-secondary font-mono uppercase">{selectedDataset.file_type}</span>
-            <span className="text-text-muted">Size</span>
-            <span className="text-text-secondary font-mono">{formatBytes(selectedDataset.size_bytes)}</span>
+            <span className="text-muted-foreground">Type</span>
+            <span className="text-foreground/80 font-mono uppercase">{selectedDataset.file_type}</span>
+            <span className="text-muted-foreground">Size</span>
+            <span className="text-foreground/80 font-mono">{formatBytes(selectedDataset.size_bytes)}</span>
             {selectedDataset.row_count !== null && (
               <>
-                <span className="text-text-muted">Rows</span>
-                <span className="text-text-secondary font-mono">{formatNumber(selectedDataset.row_count)}</span>
+                <span className="text-muted-foreground">Rows</span>
+                <span className="text-foreground/80 font-mono">{formatNumber(selectedDataset.row_count)}</span>
               </>
             )}
           </div>

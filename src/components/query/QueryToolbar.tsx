@@ -1,7 +1,10 @@
 import React from "react";
-import { Play, Zap, Bookmark, Loader2, X, Database, Download, FileSearch } from "lucide-react";
+import { Play, Zap, Bookmark, Loader2, X, Database, Download, FileSearch, Sparkles } from "lucide-react";
 import { SqlDialect, getDialectLabel } from "../../utils/sql";
-import { formatDuration, cn } from "../../utils/formatters";
+import { formatDuration } from "../../utils/formatters";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 
 interface QueryToolbarProps {
   isRunning: boolean;
@@ -24,7 +27,6 @@ interface QueryToolbarProps {
   onCancelSave: () => void;
   onConfirmSave: () => void;
   onRun: () => void;
-  onRunSelected: () => void;
   onStream: () => void;
   onCancel: () => void;
   onExplain: () => void;
@@ -32,6 +34,8 @@ interface QueryToolbarProps {
   onFormat: () => void;
   onInsertSelectTemplate: () => void;
   onInsertCountTemplate: () => void;
+  onToggleAi: () => void;
+  aiActive: boolean;
 }
 
 export function QueryToolbar({
@@ -55,7 +59,6 @@ export function QueryToolbar({
   onCancelSave,
   onConfirmSave,
   onRun,
-  onRunSelected,
   onStream,
   onCancel,
   onExplain,
@@ -63,31 +66,25 @@ export function QueryToolbar({
   onFormat,
   onInsertSelectTemplate,
   onInsertCountTemplate,
+  onToggleAi,
+  aiActive,
 }: QueryToolbarProps) {
   return (
-    <div className="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border bg-surface-2">
-      <button
+    <div className="flex flex-shrink-0 items-center gap-1.5 border-b border-border bg-card px-3 py-1.5">
+      <Button
+        size="sm"
         onClick={onRun}
         disabled={isRunning || !canQuery}
-        className="btn-primary text-xs flex items-center gap-1.5"
         title={canQuery ? "Run Query (Cmd+Enter)" : "Query execution is not supported for this source"}
       >
-        {isRunning ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Run
-      </button>
+        {isRunning ? <Loader2 className="animate-spin" /> : <Play />} Run
+      </Button>
 
-      <button
-        onClick={onRunSelected}
-        disabled={isRunning || !canQuery}
-        className="btn-ghost text-xs flex items-center gap-1.5"
-        title={canQuery ? "Run selected SQL only" : "Query execution is not supported for this source"}
-      >
-        <Play size={13} /> Run Selected
-      </button>
-
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={onStream}
         disabled={isRunning || !canQuery || !canStream}
-        className="btn-ghost text-xs flex items-center gap-1.5 text-accent-teal"
         title={
           !canQuery
             ? "Query execution is not supported for this source"
@@ -96,99 +93,104 @@ export function QueryToolbar({
               : "Streaming is not supported for this source"
         }
       >
-        <Zap size={13} /> Stream
-      </button>
+        <Zap /> Stream
+      </Button>
 
       {isRunning && (
-        <button onClick={onCancel} className="btn-ghost text-xs text-accent-red">
-          <X size={13} /> Cancel
-        </button>
+        <Button variant="destructive" size="sm" onClick={onCancel}>
+          <X /> Cancel
+        </Button>
       )}
 
-      <div className="h-4 w-px bg-border ml-1" />
+      <Separator orientation="vertical" className="mx-1 h-4" />
 
-      <button
-        onClick={onFormat}
-        disabled={!canQuery}
-        className="btn-ghost text-xs"
-        title={canQuery ? "Format SQL" : "Query editing templates are disabled for this source"}
-      >
+      <Button variant="ghost" size="sm" onClick={onFormat} disabled={!canQuery} title="Format SQL">
         Format
-      </button>
-      <button
-        onClick={onInsertSelectTemplate}
-        disabled={!canQuery}
-        className="btn-ghost text-xs"
-        title={canQuery ? "Insert SELECT template" : "Query editing templates are disabled for this source"}
-      >
+      </Button>
+      <Button variant="ghost" size="sm" onClick={onInsertSelectTemplate} disabled={!canQuery} title="Insert SELECT template">
         SELECT *
-      </button>
-      <button
-        onClick={onInsertCountTemplate}
-        disabled={!canQuery}
-        className="btn-ghost text-xs"
-        title={canQuery ? "Insert COUNT template" : "Query editing templates are disabled for this source"}
-      >
+      </Button>
+      <Button variant="ghost" size="sm" onClick={onInsertCountTemplate} disabled={!canQuery} title="Insert COUNT template">
         COUNT
-      </button>
+      </Button>
 
-      <div className="flex items-center gap-1 rounded bg-surface-3 px-2 py-1 text-[11px] text-text-muted">
+      <div className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-[11px] text-muted-foreground">
         <Database size={11} />
-        <span className="text-text-secondary">{activeSourceLabel}</span>
+        <span className="text-foreground/80">{activeSourceLabel}</span>
         <span className="opacity-50">.</span>
         <span>{getDialectLabel(activeDialect)}</span>
       </div>
 
       {canExplain && (
-        <button onClick={onExplain} disabled={isRunning || isExplaining} className="btn-ghost text-xs flex items-center gap-1.5 text-text-muted" title="Show query execution plan">
-          {isExplaining ? <Loader2 size={13} className="animate-spin" /> : <FileSearch size={13} />} Explain
-        </button>
+        <Button variant="ghost" size="sm" onClick={onExplain} disabled={isRunning || isExplaining} title="Show query execution plan">
+          {isExplaining ? <Loader2 className="animate-spin" /> : <FileSearch />} Explain
+        </Button>
       )}
 
+      <Button
+        variant={aiActive ? "secondary" : "ghost"}
+        size="sm"
+        onClick={onToggleAi}
+        title="Toggle AI Assistant"
+      >
+        <Sparkles /> AI
+      </Button>
+
       {typeof rowCount === "number" && (
-        <span className="text-xs text-text-muted font-mono">
+        <span className="font-mono text-xs text-muted-foreground">
           {rowCount.toLocaleString()} rows
           {elapsedMs !== undefined && ` . ${formatDuration(elapsedMs)}`}
         </span>
       )}
 
       {hasStreamingRows && (
-        <span className="text-xs text-accent-teal font-mono animate-pulse">↓ {streamingRowsCount.toLocaleString()} rows streaming...</span>
+        <span className="animate-pulse font-mono text-xs text-primary">↓ {streamingRowsCount.toLocaleString()} rows streaming...</span>
       )}
 
       {(hasResult || hasStreamingRows) && (
-        <button onClick={onExport} className="btn-ghost text-xs flex items-center gap-1.5 text-text-muted ml-auto" title="Export results">
-          <Download size={13} /> Export
-        </button>
+        <Button variant="ghost" size="sm" className="ml-auto" onClick={onExport} title="Export results">
+          <Download /> Export
+        </Button>
       )}
 
       {showSaveInput ? (
         <form
-          className="flex items-center gap-1 ml-auto"
+          className={(hasResult || hasStreamingRows) ? "flex items-center gap-1" : "ml-auto flex items-center gap-1"}
           onSubmit={(e) => {
             e.preventDefault();
             onConfirmSave();
           }}
         >
-          <input
+          <Input
             autoFocus
             type="text"
             placeholder="Query name..."
             value={saveName}
             onChange={(e) => onSaveNameChange(e.target.value)}
-            className="text-xs bg-surface-3 border border-border rounded px-2 py-1 text-text-secondary placeholder:text-text-muted outline-none focus:border-accent-blue w-36"
+            className="h-7 w-36 text-xs"
           />
-          <button type="submit" className="btn-primary text-xs px-2 py-1">Save</button>
-          <button type="button" onClick={onCancelSave} className="btn-ghost text-xs px-1 py-1"><X size={12} /></button>
+          <Button type="submit" size="sm">Save</Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={onCancelSave}
+            aria-label="Cancel save"
+            title="Cancel"
+          >
+            <X />
+          </Button>
         </form>
       ) : (
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
+          className={hasResult || hasStreamingRows ? undefined : "ml-auto"}
           onClick={onOpenSave}
-          className={cn("btn-ghost text-xs flex items-center gap-1.5 text-text-muted", !(hasResult || hasStreamingRows) && "ml-auto")}
           title="Save query"
         >
-          <Bookmark size={13} /> Save
-        </button>
+          <Bookmark /> Save
+        </Button>
       )}
     </div>
   );

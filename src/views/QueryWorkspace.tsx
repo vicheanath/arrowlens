@@ -1,29 +1,46 @@
 import React from "react";
-import CodeMirror, { EditorView } from "@uiw/react-codemirror";
-import { sql as sqlLang } from "@codemirror/lang-sql";
-import { oneDark } from "@codemirror/theme-one-dark";
-import { Play, X } from "lucide-react";
+import { EditorView } from "@uiw/react-codemirror";
 import { ExportModal } from "../components/ExportModal";
 import { QueryEditorTabs } from "../components/query/QueryEditorTabs";
 import { QueryToolbar } from "../components/query/QueryToolbar";
+import { SqlEditor } from "../components/query/SqlEditor";
+import { AiFixBar } from "../features/query-workspace/components/AiFixBar";
 import { QueryResultPanel } from "../features/query-workspace/components/QueryResultPanel";
-import { getDialectLabel } from "../utils/sql";
+import { AiPanel } from "../features/ai-assistant";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../components/ui/resizable";
 import { useQueryWorkspaceViewModel } from "../view-models/useQueryWorkspaceViewModel";
 
 export function QueryWorkspace() {
   const vm = useQueryWorkspaceViewModel();
+  const [showAi, setShowAi] = React.useState(false);
 
-  const editorExtensions = React.useMemo(() => {
-    const config = {
+  const editorLangConfig = React.useMemo(
+    () => ({
       dialect: vm.dialectConfig,
       upperCaseKeywords: true,
       schema: vm.completionSchema,
-    } as any;
-    return [sqlLang(config), EditorView.lineWrapping];
-  }, [vm.completionSchema, vm.dialectConfig]);
+      dialectName: vm.activeDialect,
+    }),
+    [vm.completionSchema, vm.dialectConfig, vm.activeDialect],
+  );
+
+  // Stable ref-setter — `editorViewRef` keeps the same identity across renders.
+  const editorViewRef = vm.editorViewRef;
+  const handleCreateEditor = React.useCallback(
+    (view: EditorView) => {
+      editorViewRef.current = view;
+    },
+    [editorViewRef],
+  );
 
   return (
-    <div ref={vm.containerRef} className="flex flex-col h-full overflow-hidden">
+    <ResizablePanelGroup
+      direction="horizontal"
+      autoSaveId="arrowlens-workspace-horizontal"
+      className="h-full overflow-hidden"
+    >
+      <ResizablePanel id="workspace-main" order={1} minSize={30} className="min-w-0">
+      <div ref={vm.containerRef} className="flex flex-col h-full overflow-hidden min-w-0">
       <QueryEditorTabs
         tabs={vm.tabs}
         activeTabId={vm.activeTabId}
@@ -58,7 +75,6 @@ export function QueryWorkspace() {
           vm.setShowSaveInput(false);
         }}
         onRun={() => vm.runWithSelectionFallback(false)}
-        onRunSelected={vm.runSelectedOnly}
         onStream={() => vm.runWithSelectionFallback(true)}
         onCancel={vm.cancelQuery}
         onExplain={vm.onExplain}
@@ -66,86 +82,91 @@ export function QueryWorkspace() {
         onFormat={() => vm.onEditorSqlChange(vm.formatSql(vm.activeTabSql ?? ""))}
         onInsertSelectTemplate={() => { void vm.insertSelectTemplate(); }}
         onInsertCountTemplate={() => { void vm.insertCountTemplate(); }}
+        onToggleAi={() => setShowAi((value) => !value)}
+        aiActive={showAi}
       />
 
-      <div className="flex-shrink-0" style={{ height: 220 }}>
-        <CodeMirror
-          value={vm.activeTabSql ?? vm.sql}
-          onCreateEditor={(view) => {
-            vm.editorViewRef.current = view;
-          }}
-          onChange={vm.onEditorSqlChange}
-          extensions={editorExtensions}
-          theme={oneDark}
-          height="220px"
-          placeholder={vm.defaultSqlTemplate}
-          style={{
-            fontSize: 13,
-            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-          }}
-          basicSetup={{
-            lineNumbers: true,
-            highlightActiveLineGutter: true,
-            highlightSpecialChars: true,
-            history: true,
-            foldGutter: true,
-            drawSelection: true,
-            dropCursor: true,
-            allowMultipleSelections: true,
-            indentOnInput: true,
-            syntaxHighlighting: true,
-            bracketMatching: true,
-            closeBrackets: true,
-            autocompletion: true,
-            rectangularSelection: true,
-            crosshairCursor: false,
-            highlightActiveLine: true,
-            highlightSelectionMatches: true,
-          }}
-        />
-      </div>
+      <ResizablePanelGroup
+        direction="vertical"
+        autoSaveId="arrowlens-editor-results"
+        className="flex-1 min-h-0"
+      >
+        <ResizablePanel id="editor" order={1} defaultSize={32} minSize={12} className="min-h-0">
+          <div className="h-full overflow-hidden">
+            <SqlEditor
+              value={vm.activeTabSql ?? vm.sql}
+              onCreateEditor={handleCreateEditor}
+              onChange={vm.onEditorSqlChange}
+              langConfig={editorLangConfig}
+              placeholder={vm.defaultSqlTemplate}
+            />
+          </div>
+        </ResizablePanel>
 
-      {vm.error && (
-        <div className="flex-shrink-0 flex items-start gap-2 px-3 py-2 bg-accent-red/10 border-b border-accent-red/30 text-accent-red text-xs">
-          <span className="flex-1 font-mono">{vm.error}</span>
-          <button onClick={vm.clearError} className="flex-shrink-0 hover:opacity-80">
-            <X size={12} />
-          </button>
-        </div>
-      )}
+        <ResizableHandle withHandle />
 
-      <QueryResultPanel
-        hasCompletedResult={vm.hasCompletedResult}
-        isRunning={vm.isRunning}
-        displayColumns={vm.displayColumns}
-        displayRows={vm.displayRows}
-        displayTypes={vm.displayTypes}
-        filteredRows={vm.filteredRows}
-        resultTab={vm.resultTab}
-        explainPlan={vm.explainPlan}
-        isExplaining={vm.isExplaining}
-        filterText={vm.filterText}
-        setFilterText={vm.setFilterText}
-        setResultTab={vm.setResultTab}
-        onExplainRerun={vm.onExplainRerun}
-        tableAreaHeight={vm.tableAreaHeight}
-      />
+        <ResizablePanel id="results" order={2} defaultSize={68} minSize={15} className="flex flex-col min-h-0">
+          {vm.error && (
+            <AiFixBar
+              error={vm.error}
+              sql={vm.activeTabSql ?? vm.sql}
+              connectionId={vm.selectedConnectionId}
+              onApply={(fixed) => {
+                vm.onEditorSqlChange(fixed);
+                vm.clearError();
+              }}
+              onDismiss={vm.clearError}
+            />
+          )}
 
-      {!vm.isRunning && !vm.hasCompletedResult && vm.displayRows.length === 0 && !vm.error && !vm.explainPlan && (
-        <div className="flex-1 flex flex-col items-center justify-center text-text-muted gap-2">
-          <Play size={32} className="opacity-20" />
-          <p className="text-sm">Run a SQL query to see results</p>
-          <p className="text-xs opacity-60">{getDialectLabel(vm.activeDialect)} dialect. Press Cmd+Enter to execute</p>
-        </div>
-      )}
+          <QueryResultPanel
+            hasCompletedResult={vm.hasCompletedResult}
+            isRunning={vm.isRunning}
+            displayColumns={vm.displayColumns}
+            displayRows={vm.displayRows}
+            displayTypes={vm.displayTypes}
+            filteredRows={vm.filteredRows}
+            statementResults={vm.statementResults}
+            truncated={vm.result?.truncated}
+            resultTab={vm.resultTab}
+            explainPlan={vm.explainPlan}
+            isExplaining={vm.isExplaining}
+            filterText={vm.filterText}
+            setFilterText={vm.setFilterText}
+            setResultTab={vm.setResultTab}
+            onExplainRerun={vm.onExplainRerun}
+            tableAreaHeight={vm.tableAreaHeight}
+            onLoadMore={vm.onLoadMore}
+            hasMoreRows={vm.hasMoreRows}
+            isLoadingMoreRows={vm.isLoadingMoreRows}
+          />
+        </ResizablePanel>
+      </ResizablePanelGroup>
 
       {vm.showExportModal && (
         <ExportModal
           sql={vm.activeTabSql ?? vm.sql}
           rowCount={vm.isStreaming ? vm.streaming.rows.length : vm.result?.row_count ?? 0}
+          connectionId={vm.selectedConnectionId}
           onClose={() => vm.setShowExportModal(false)}
         />
       )}
-    </div>
+      </div>
+      </ResizablePanel>
+
+      {showAi && (
+        <>
+          <ResizableHandle withHandle />
+          <ResizablePanel id="ai" order={2} defaultSize={26} minSize={16} maxSize={50} className="min-w-0">
+            <AiPanel
+              connectionId={vm.selectedConnectionId}
+              currentSql={vm.activeTabSql ?? vm.sql}
+              onInsertSql={(sql) => vm.onEditorSqlChange(sql)}
+              onClose={() => setShowAi(false)}
+            />
+          </ResizablePanel>
+        </>
+      )}
+    </ResizablePanelGroup>
   );
 }

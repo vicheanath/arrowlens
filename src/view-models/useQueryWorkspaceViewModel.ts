@@ -18,8 +18,8 @@ import { useQueryResultPresentation } from "../features/query-results";
 
 export function useQueryWorkspaceViewModel() {
   const { sql, setSql } = useQuerySqlStore();
-  const { isRunning, result, error, streaming, isStreaming, explainPlan, isExplaining } = useQueryExecutionState();
-  const { runQuery, runStreamingQuery, cancelQuery, clearError, runExplain } = useQueryExecutionActions();
+  const { isRunning, result, statementResults, error, streaming, isStreaming, pagination, explainPlan, isExplaining } = useQueryExecutionState();
+  const { runQuery, runStreamingQuery, loadMoreRows, cancelQuery, clearError, runExplain } = useQueryExecutionActions();
   const { loadHistory } = useQueryHistoryStore();
   const { saveQuery } = useSavedQueriesStore();
 
@@ -95,7 +95,7 @@ export function useQueryWorkspaceViewModel() {
     return () => ro.disconnect();
   }, []);
 
-  const { runWithSelectionFallback, runSelectedOnly, getSelectedSql } = useQueryExecutionShortcuts({
+  const { runWithSelectionFallback, getSelectedSql } = useQueryExecutionShortcuts({
     editorViewRef,
     activeTabSql,
     sql,
@@ -142,6 +142,7 @@ export function useQueryWorkspaceViewModel() {
     sql,
     isRunning,
     result,
+    statementResults,
     error,
     streaming,
     isStreaming,
@@ -171,6 +172,9 @@ export function useQueryWorkspaceViewModel() {
     defaultSqlTemplate,
     tableAreaHeight,
     hasCompletedResult,
+    onLoadMore: loadMoreRows,
+    hasMoreRows: pagination.active && pagination.hasMore,
+    isLoadingMoreRows: pagination.isLoadingMore,
     containerRef,
     editorViewRef,
     setResultTab,
@@ -184,7 +188,6 @@ export function useQueryWorkspaceViewModel() {
     cancelQuery,
     createNewTab,
     closeTabById,
-    runSelectedOnly,
     runWithSelectionFallback,
     onEditorSqlChange,
     appendTemplate,

@@ -9,11 +9,13 @@ export type ExportFormat = "csv" | "json" | "parquet";
 export function exportQueryResults(
   sql: string,
   destPath: string,
-  format: ExportFormat
+  format: ExportFormat,
+  connectionId?: string | null,
 ): Promise<number> {
   return invokeCommand<number>("export_query_results", {
     sql,
     destPath,
     format,
+    connectionId: connectionId ?? null,
   });
 }

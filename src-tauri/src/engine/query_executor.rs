@@ -19,6 +19,10 @@ pub enum ExecutionTarget {
 #[async_trait]
 pub trait QueryExecutor: Send + Sync {
     async fn execute(&self, sql: &str) -> Result<QueryResult>;
+    /// Execute one window of a read query: skip `offset` rows and return at most
+    /// `limit`. Used to lazily page large result sets as the user scrolls. Only
+    /// meaningful for single read-only statements.
+    async fn execute_page(&self, sql: &str, offset: usize, limit: usize) -> Result<QueryResult>;
     async fn execute_streaming(
         &self,
         app: AppHandle,

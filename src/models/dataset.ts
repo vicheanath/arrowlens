@@ -40,23 +40,91 @@ export type ColumnTypeCategory =
   | "binary"
   | "other";
 
+/**
+ * Classify a column's declared type into a display category. Covers Arrow,
+ * SQLite (type affinities) and the full PostgreSQL type vocabulary, including
+ * the array (`_int4` / `int4[]`) and parameterized (`varchar(50)`) spellings
+ * that drivers emit.
+ */
 export function getTypeCategory(dataType: string): ColumnTypeCategory {
-  const t = dataType.toLowerCase();
-  if (t === "boolean") return "boolean";
-  if (["string", "utf8", "largeutf8"].includes(t)) return "string";
-  if (["date"].includes(t)) return "date";
-  if (t === "timestamp") return "timestamp";
-  if (t === "time") return "time";
-  if (["binary", "largebinary"].includes(t)) return "binary";
+  let t = dataType.toLowerCase().trim();
+  if (!t) return "other";
+
+  // Normalize array spellings: Postgres reports `_int4`; DDL uses `int4[]`.
+  // Classify arrays by their element type.
+  if (t.startsWith("_")) t = t.slice(1);
+  t = t.replace(/\[\s*\d*\s*\]/g, "").trim();
+  // Drop size/precision args, e.g. "varchar(50)" -> "varchar", "numeric(10,2)".
+  const base = t.replace(/\(.*$/, "").trim();
+
+  // Booleans — match before numeric so "bool" isn't caught as "int".
+  if (base === "bool" || base === "boolean") return "boolean";
+
+  // Binary blobs.
   if (
-    [
-      "int8", "int16", "int32", "int64",
-      "uint8", "uint16", "uint32", "uint64",
-      "float32", "float64", "float16",
-    ].includes(t) ||
-    t.startsWith("decimal")
-  )
+    base.includes("blob") ||
+    base.includes("binary") ||
+    base === "bytea" ||
+    base.includes("bytes")
+  ) {
+    return "binary";
+  }
+
+  // Date/time — check the more specific timestamp/datetime first. Postgres
+  // `interval` is a duration; group it with time-like values.
+  if (base.includes("timestamp") || base.includes("datetime")) return "timestamp";
+  if (base === "time" || base.startsWith("time") || base === "interval") return "time";
+  if (base === "date") return "date";
+
+  // Range types (int4range, tsrange, …) aren't scalar numerics/dates.
+  if (base.endsWith("range") || base.endsWith("multirange")) return "other";
+
+  // Numerics — Arrow (int64, float64), SQL integers (integer, int2/4/8, bigint,
+  // smallint, tinyint, serial), and decimals/floats (real, double precision,
+  // numeric, decimal, money), plus Postgres object identifiers (oid, reg*).
+  if (
+    base.includes("int") ||
+    base.includes("serial") ||
+    base.includes("numeric") ||
+    base.includes("decimal") ||
+    base.startsWith("dec") ||
+    base.includes("real") ||
+    base.includes("double") ||
+    base.includes("float") ||
+    base === "money" ||
+    base === "number" ||
+    base === "oid" ||
+    base.startsWith("reg")
+  ) {
     return "numeric";
+  }
+
+  // Strings — Arrow (utf8), SQL text (varchar, char, text, clob, citext), and
+  // the many Postgres types best shown as text: uuid, json/jsonb, xml, enum,
+  // network (inet/cidr/macaddr), bit strings, full-text search, geometric, etc.
+  if (
+    base.includes("char") ||
+    base.includes("text") ||
+    base.includes("string") ||
+    base === "utf8" ||
+    base === "largeutf8" ||
+    base === "clob" ||
+    base === "uuid" ||
+    base === "name" ||
+    base === "enum" ||
+    base.includes("json") ||
+    base === "xml" ||
+    base === "inet" ||
+    base === "cidr" ||
+    base.startsWith("macaddr") ||
+    base === "bit" ||
+    base === "varbit" ||
+    base.startsWith("ts") || // tsvector, tsquery
+    base === "ltree"
+  ) {
+    return "string";
+  }
+
   return "other";
 }
 

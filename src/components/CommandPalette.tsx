@@ -1,19 +1,21 @@
-import React, { useEffect } from "react";
-import { Command } from "cmdk";
-import {
-  Database,
-  Play,
-  Upload,
-  Clock,
-  BookOpen,
-  X,
-  BarChart2,
-} from "lucide-react";
+import React from "react";
+import { Database, Play, Upload, Clock, FolderOpen, Save, Sparkles } from "lucide-react";
 import { useCommandPaletteState } from "../state/uiStore";
 import { useDatasetActions, useDatasetCollectionState } from "../state/datasetStore";
-import { useDatabaseState } from "../state/databaseStore";
+import { useDatabaseActions, useDatabaseState } from "../state/databaseStore";
 import { useQueryExecutionActions, useQueryHistoryStore, useQuerySqlStore } from "../state/queryStore";
-import { cn } from "../utils/formatters";
+import { openSqlFile, saveSqlFile, prepareSampleDatabase } from "../services/fileService";
+import { useToastStore } from "../utils/toast";
+import { errorToMessage } from "../utils/errors";
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandShortcut,
+} from "@/components/ui/command";
 
 interface CommandPaletteProps {
   onImportDataset: () => void;
@@ -23,148 +25,159 @@ export function CommandPalette({ onImportDataset }: CommandPaletteProps) {
   const { isCommandPaletteOpen, closeCommandPalette } = useCommandPaletteState();
   const { runQuery } = useQueryExecutionActions();
   const { history } = useQueryHistoryStore();
-  const { setSql } = useQuerySqlStore();
+  const { sql, setSql } = useQuerySqlStore();
   const { datasets } = useDatasetCollectionState();
   const { selectDataset } = useDatasetActions();
   const { selectedConnectionId } = useDatabaseState();
+  const { connectSqliteDatabase } = useDatabaseActions();
+  const { addToast } = useToastStore();
 
-  useEffect(() => {
-    if (!isCommandPaletteOpen) return;
-    const down = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeCommandPalette();
+  const handleLoadSample = React.useCallback(async () => {
+    try {
+      const path = await prepareSampleDatabase();
+      await connectSqliteDatabase(path, "Sakila (sample)");
+      addToast({ type: "success", title: "Sample database loaded", message: "Sakila (sample)" });
+    } catch (e) {
+      addToast({ type: "error", title: "Couldn't load sample", message: errorToMessage(e), duration: 6000 });
+    }
+  }, [connectSqliteDatabase, addToast]);
+
+  // Latest SQL via a ref so the global shortcut handler doesn't re-bind on edit.
+  const sqlRef = React.useRef(sql);
+  sqlRef.current = sql;
+
+  const handleOpenFile = React.useCallback(async () => {
+    try {
+      const result = await openSqlFile();
+      if (result) {
+        setSql(result.content);
+        addToast({ type: "success", title: "Opened", message: result.path });
+      }
+    } catch (e) {
+      addToast({ type: "error", title: "Open failed", message: errorToMessage(e), duration: 6000 });
+    }
+  }, [setSql, addToast]);
+
+  const handleSaveFile = React.useCallback(async () => {
+    try {
+      const path = await saveSqlFile(sqlRef.current ?? "");
+      if (path) addToast({ type: "success", title: "Saved", message: path });
+    } catch (e) {
+      addToast({ type: "error", title: "Save failed", message: errorToMessage(e), duration: 6000 });
+    }
+  }, [addToast]);
+
+  // Global shortcuts: ⌘/Ctrl+S saves, ⌘/Ctrl+Shift+O opens. (⌘O is Import.)
+  React.useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod) return;
+      const key = event.key.toLowerCase();
+      if (key === "s" && !event.shiftKey) {
+        event.preventDefault();
+        void handleSaveFile();
+      } else if (key === "o" && event.shiftKey) {
+        event.preventDefault();
+        void handleOpenFile();
+      }
     };
-    document.addEventListener("keydown", down);
-    return () => document.removeEventListener("keydown", down);
-  }, [isCommandPaletteOpen, closeCommandPalette]);
-
-  if (!isCommandPaletteOpen) return null;
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleSaveFile, handleOpenFile]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] bg-black/60 backdrop-blur-sm"
-      onClick={() => closeCommandPalette()}
+    <CommandDialog
+      open={isCommandPaletteOpen}
+      onOpenChange={(open) => { if (!open) closeCommandPalette(); }}
     >
-      <div
-        className="w-full max-w-xl bg-surface-2 rounded-xl border border-border shadow-tooltip overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <Command label="Command Menu" className="text-text-primary">
-          <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              className="text-text-muted flex-shrink-0"
-              fill="currentColor"
-            >
-              <path d="M3.5 2a1.5 1.5 0 100 3 1.5 1.5 0 000-3zM1 3.5a2.5 2.5 0 115 0 2.5 2.5 0 01-5 0zM12.5 2a1.5 1.5 0 100 3 1.5 1.5 0 000-3zM10 3.5a2.5 2.5 0 115 0 2.5 2.5 0 01-5 0zM3.5 11a1.5 1.5 0 100 3 1.5 1.5 0 000-3zM1 12.5a2.5 2.5 0 115 0 2.5 2.5 0 01-5 0z" />
-            </svg>
-            <Command.Input
-              placeholder="Type a command or search…"
-              className="flex-1 bg-transparent text-text-primary placeholder:text-text-muted outline-none text-sm"
-              autoFocus
-            />
-            <button onClick={closeCommandPalette} className="btn-ghost p-1 rounded">
-              <X size={14} />
-            </button>
-          </div>
+      <CommandInput placeholder="Type a command or search…" />
+      <CommandList>
+        <CommandEmpty>No results found.</CommandEmpty>
 
-          <Command.List className="max-h-80 overflow-y-auto py-2">
-            <Command.Empty className="py-6 text-center text-sm text-text-muted">
-              No results found.
-            </Command.Empty>
+        <CommandGroup heading="Actions">
+          <CommandItem
+            value="load sample database sakila"
+            onSelect={() => {
+              closeCommandPalette();
+              void handleLoadSample();
+            }}
+          >
+            <Sparkles /> Load sample database
+          </CommandItem>
+          <CommandItem
+            onSelect={() => {
+              closeCommandPalette();
+              onImportDataset();
+            }}
+          >
+            <Upload /> Import Dataset
+            <CommandShortcut>⌘O</CommandShortcut>
+          </CommandItem>
+          <CommandItem
+            onSelect={() => {
+              closeCommandPalette();
+              runQuery(selectedConnectionId);
+            }}
+          >
+            <Play /> Run Query
+            <CommandShortcut>⌘↵</CommandShortcut>
+          </CommandItem>
+          <CommandItem
+            value="open sql file"
+            onSelect={() => {
+              closeCommandPalette();
+              void handleOpenFile();
+            }}
+          >
+            <FolderOpen /> Open SQL file…
+            <CommandShortcut>⌘⇧O</CommandShortcut>
+          </CommandItem>
+          <CommandItem
+            value="save sql file"
+            onSelect={() => {
+              closeCommandPalette();
+              void handleSaveFile();
+            }}
+          >
+            <Save /> Save SQL to file…
+            <CommandShortcut>⌘S</CommandShortcut>
+          </CommandItem>
+        </CommandGroup>
 
-            <Command.Group heading="Actions" className="px-2">
+        {datasets.length > 0 && (
+          <CommandGroup heading="Datasets">
+            {datasets.map((ds) => (
               <CommandItem
-                icon={<Upload size={14} />}
-                label="Import Dataset"
-                shortcut="⌘O"
+                key={ds.id}
+                value={`dataset ${ds.name}`}
                 onSelect={() => {
                   closeCommandPalette();
-                  onImportDataset();
+                  selectDataset(ds.id);
                 }}
-              />
+              >
+                <Database /> {ds.name}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {history.length > 0 && (
+          <CommandGroup heading="Recent Queries">
+            {history.slice(0, 5).map((h) => (
               <CommandItem
-                icon={<Play size={14} />}
-                label="Run Query"
-                shortcut="⌘↵"
+                key={h.id}
+                value={`history ${h.id} ${h.sql}`}
                 onSelect={() => {
                   closeCommandPalette();
-                  runQuery(selectedConnectionId);
+                  setSql(h.sql);
                 }}
-              />
-            </Command.Group>
-
-            {datasets.length > 0 && (
-              <Command.Group heading="Datasets" className="px-2 mt-2">
-                {datasets.map((ds) => (
-                  <CommandItem
-                    key={ds.id}
-                    icon={<Database size={14} />}
-                    label={ds.name}
-                    onSelect={() => {
-                      closeCommandPalette();
-                      selectDataset(ds.id);
-                    }}
-                  />
-                ))}
-              </Command.Group>
-            )}
-
-            {history.length > 0 && (
-              <Command.Group heading="Recent Queries" className="px-2 mt-2">
-                {history.slice(0, 5).map((h) => (
-                  <CommandItem
-                    key={h.id}
-                    icon={<Clock size={14} />}
-                    label={h.sql.slice(0, 60) + (h.sql.length > 60 ? "…" : "")}
-                    onSelect={() => {
-                      closeCommandPalette();
-                      setSql(h.sql);
-                    }}
-                  />
-                ))}
-              </Command.Group>
-            )}
-          </Command.List>
-
-          <div className="border-t border-border px-4 py-2 flex items-center gap-4 text-xs text-text-muted">
-            <span>↑↓ navigate</span>
-            <span>↵ select</span>
-            <span>Esc close</span>
-          </div>
-        </Command>
-      </div>
-    </div>
-  );
-}
-
-interface CommandItemProps {
-  icon: React.ReactNode;
-  label: string;
-  shortcut?: string;
-  onSelect: () => void;
-}
-
-function CommandItem({ icon, label, shortcut, onSelect }: CommandItemProps) {
-  return (
-    <Command.Item
-      value={label}
-      onSelect={onSelect}
-      className={cn(
-        "flex items-center gap-2.5 px-3 py-2 rounded text-sm cursor-pointer",
-        "text-text-secondary",
-        "aria-selected:bg-surface-4 aria-selected:text-text-primary",
-        "transition-colors"
-      )}
-    >
-      <span className="text-text-muted">{icon}</span>
-      <span className="flex-1">{label}</span>
-      {shortcut && (
-        <kbd className="text-xs text-text-muted bg-surface-4 px-1.5 py-0.5 rounded font-mono">
-          {shortcut}
-        </kbd>
-      )}
-    </Command.Item>
+              >
+                <Clock /> {h.sql.slice(0, 60) + (h.sql.length > 60 ? "…" : "")}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+      </CommandList>
+    </CommandDialog>
   );
 }

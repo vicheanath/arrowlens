@@ -7,6 +7,7 @@ use crate::cache::app_store::AppStore;
 use crate::engine::database_registry::DatabaseType;
 use crate::engine::database_registry::DatabaseRegistry;
 use crate::engine::dataset_registry::DatasetRegistry;
+use crate::engine::provider::provider_for;
 use crate::engine::query_executor::{ExecutionTarget, ExecutorFactory};
 use crate::error::{AppError, Result};
 use crate::state::active_queries;
@@ -32,6 +33,20 @@ pub struct HistoryEntry {
     pub executed_at: String,
     pub elapsed_ms: Option<u64>,
     pub row_count: Option<usize>,
+    pub error: Option<String>,
+}
+
+/// Result of one statement in a multi-statement script run.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StatementResult {
+    pub index: usize,
+    pub sql: String,
+    pub columns: Vec<String>,
+    pub column_types: Vec<String>,
+    pub rows: Vec<Vec<serde_json::Value>>,
+    pub row_count: usize,
+    pub elapsed_ms: u64,
+    pub truncated: bool,
     pub error: Option<String>,
 }
 
@@ -81,6 +96,213 @@ pub async fn run_query(
     );
 
     Ok(result)
+}
+
+/// Execute one page of a read query (skip `offset` rows, return at most
+/// `limit`). Powers lazy load-on-scroll: the frontend fetches the first page for
+/// instant first paint, then requests further pages as the user scrolls. No
+/// history is recorded for page fetches. Intended for single read-only
+/// statements; the caller (frontend) falls back to `run_query_multi` on error.
+#[tauri::command]
+pub async fn run_query_page(
+    sql: String,
+    connection_id: Option<String>,
+    offset: usize,
+    limit: usize,
+    registry: State<'_, Arc<DatasetRegistry>>,
+    db_registry: State<'_, Arc<DatabaseRegistry>>,
+    app_store: State<'_, Arc<AppStore>>,
+) -> Result<QueryResult> {
+    if sql.trim().is_empty() {
+        return Err(AppError::QuerySyntaxError("Query cannot be empty".to_string()));
+    }
+
+    let target = match connection_id {
+        Some(id) => ExecutionTarget::Database { connection_id: id },
+        None => ExecutionTarget::Datasets,
+    };
+    let factory = ExecutorFactory::new(registry.inner().clone(), db_registry.inner().clone());
+    let executor = factory.resolve(target)?;
+    let result = executor.execute_page(&sql, offset, limit).await?;
+
+    // Only the first page represents "running" the query — record it in history
+    // once; later page fetches are silent so scrolling doesn't spam history.
+    if offset == 0 {
+        record_history(
+            &sql,
+            Some(result.elapsed_ms),
+            Some(result.row_count),
+            None,
+            app_store.inner().as_ref(),
+        );
+    }
+
+    Ok(result)
+}
+
+/// Execute every statement in a SQL script and return one result set per
+/// statement (SQL Studio style). Statements are split on `;` while respecting
+/// string literals, quoted identifiers, and comments. A failing statement is
+/// captured as an error and does not abort the rest.
+#[tauri::command]
+pub async fn run_query_multi(
+    sql: String,
+    connection_id: Option<String>,
+    registry: State<'_, Arc<DatasetRegistry>>,
+    db_registry: State<'_, Arc<DatabaseRegistry>>,
+    app_store: State<'_, Arc<AppStore>>,
+) -> Result<Vec<StatementResult>> {
+    let statements = split_sql_statements(&sql);
+    if statements.is_empty() {
+        return Err(AppError::QuerySyntaxError("Query cannot be empty".to_string()));
+    }
+
+    let target = match connection_id {
+        Some(id) => ExecutionTarget::Database { connection_id: id },
+        None => ExecutionTarget::Datasets,
+    };
+    let factory = ExecutorFactory::new(registry.inner().clone(), db_registry.inner().clone());
+    let executor = factory.resolve(target)?;
+
+    let mut results = Vec::with_capacity(statements.len());
+    for (index, statement) in statements.iter().enumerate() {
+        match executor.execute(statement).await {
+            Ok(result) => {
+                record_history(
+                    statement,
+                    Some(result.elapsed_ms),
+                    Some(result.row_count),
+                    None,
+                    app_store.inner().as_ref(),
+                );
+                results.push(StatementResult {
+                    index,
+                    sql: statement.clone(),
+                    columns: result.columns,
+                    column_types: result.column_types,
+                    rows: result.rows,
+                    row_count: result.row_count,
+                    elapsed_ms: result.elapsed_ms,
+                    truncated: result.truncated,
+                    error: None,
+                });
+            }
+            Err(e) => {
+                let message = e.to_string();
+                record_history(
+                    statement,
+                    None,
+                    None,
+                    Some(message.clone()),
+                    app_store.inner().as_ref(),
+                );
+                results.push(StatementResult {
+                    index,
+                    sql: statement.clone(),
+                    columns: Vec::new(),
+                    column_types: Vec::new(),
+                    rows: Vec::new(),
+                    row_count: 0,
+                    elapsed_ms: 0,
+                    truncated: false,
+                    error: Some(message),
+                });
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+/// Split a SQL script into individual statements, honoring single/double quotes
+/// (with doubled-quote escapes), line comments (`--`), and block comments
+/// (`/* */`). Empty statements are dropped.
+fn split_sql_statements(sql: &str) -> Vec<String> {
+    enum State {
+        Normal,
+        SingleQuote,
+        DoubleQuote,
+        LineComment,
+        BlockComment,
+    }
+
+    let mut statements = Vec::new();
+    let mut current = String::new();
+    let mut state = State::Normal;
+    let mut chars = sql.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match state {
+            State::Normal => match c {
+                '\'' => {
+                    current.push(c);
+                    state = State::SingleQuote;
+                }
+                '"' => {
+                    current.push(c);
+                    state = State::DoubleQuote;
+                }
+                '-' if chars.peek() == Some(&'-') => {
+                    current.push(c);
+                    current.push(chars.next().unwrap());
+                    state = State::LineComment;
+                }
+                '/' if chars.peek() == Some(&'*') => {
+                    current.push(c);
+                    current.push(chars.next().unwrap());
+                    state = State::BlockComment;
+                }
+                ';' => {
+                    let trimmed = current.trim();
+                    if !trimmed.is_empty() {
+                        statements.push(trimmed.to_string());
+                    }
+                    current.clear();
+                }
+                _ => current.push(c),
+            },
+            State::SingleQuote => {
+                current.push(c);
+                if c == '\'' {
+                    if chars.peek() == Some(&'\'') {
+                        current.push(chars.next().unwrap());
+                    } else {
+                        state = State::Normal;
+                    }
+                }
+            }
+            State::DoubleQuote => {
+                current.push(c);
+                if c == '"' {
+                    if chars.peek() == Some(&'"') {
+                        current.push(chars.next().unwrap());
+                    } else {
+                        state = State::Normal;
+                    }
+                }
+            }
+            State::LineComment => {
+                current.push(c);
+                if c == '\n' {
+                    state = State::Normal;
+                }
+            }
+            State::BlockComment => {
+                current.push(c);
+                if c == '*' && chars.peek() == Some(&'/') {
+                    current.push(chars.next().unwrap());
+                    state = State::Normal;
+                }
+            }
+        }
+    }
+
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        statements.push(trimmed.to_string());
+    }
+
+    statements
 }
 
 /// Execute a SQL query and stream results back as Tauri events.
@@ -249,17 +471,7 @@ pub async fn explain_query(
                 .get(&id)
                 .ok_or(AppError::DatabaseNotFound)?;
 
-            let esql = match connection.database_type {
-                DatabaseType::Postgres => build_postgres_explain_sql(&sql, verbose),
-                DatabaseType::Mysql => {
-                    if verbose {
-                        format!("EXPLAIN ANALYZE {}", sql)
-                    } else {
-                        format!("EXPLAIN {}", sql)
-                    }
-                }
-                DatabaseType::Sqlite => format!("EXPLAIN QUERY PLAN {}", sql),
-            };
+            let esql = provider_for(connection.database_type).explain_sql(&sql, verbose);
 
             (ExecutionTarget::Database { connection_id: id }, esql)
         }
@@ -295,17 +507,6 @@ pub async fn explain_query(
     }).collect();
 
     Ok(plan_lines.join("\n"))
-}
-
-fn build_postgres_explain_sql(sql: &str, analyze: bool) -> String {
-    if analyze {
-        format!(
-            "EXPLAIN (ANALYZE, VERBOSE, BUFFERS, FORMAT TEXT) {}",
-            sql
-        )
-    } else {
-        format!("EXPLAIN (VERBOSE, FORMAT TEXT) {}", sql)
-    }
 }
 
 fn resolve_sql_dialect(
@@ -363,9 +564,10 @@ fn resolve_table_identifier(table_name: &str, dialect: Option<DatabaseType>) -> 
     quote_identifier(&resolved, dialect)
 }
 
-fn quote_identifier(identifier: &str, dialect: Option<DatabaseType>) -> String {
+pub(crate) fn quote_identifier(identifier: &str, dialect: Option<DatabaseType>) -> String {
     let quote_part = |part: &str| match dialect {
         Some(DatabaseType::Mysql) => format!("`{}`", part.replace('`', "``")),
+        Some(DatabaseType::Mssql) => format!("[{}]", part.replace(']', "]]")),
         _ => format!("\"{}\"", part.replace('"', "\"\"")),
     };
 
@@ -382,6 +584,7 @@ fn dialect_label(dialect: Option<DatabaseType>) -> &'static str {
         Some(DatabaseType::Sqlite) => "SQLite",
         Some(DatabaseType::Mysql) => "MySQL",
         Some(DatabaseType::Postgres) => "PostgreSQL",
+        Some(DatabaseType::Mssql) => "SQL Server",
         None => "DataFusion",
     }
 }

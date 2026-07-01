@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import type { HistoryEntry, QueryResult, StreamChunk } from "../../models/query";
+import type { HistoryEntry, QueryResult, StatementResult, StreamChunk } from "../../models/query";
 import type { Source } from "../../entities/source/types";
 import * as queryService from "../../services/queryService";
 import { errorToMessage } from "../../utils/errors";
@@ -30,6 +30,29 @@ export async function runQueryRequest(
   });
 
   return queryService.runQuery(sql, context.connectionId);
+}
+
+export async function runQueryPageRequest(
+  sql: string,
+  context: QueryExecutionContext,
+  offset: number,
+  limit: number,
+): Promise<QueryResult> {
+  return queryService.runQueryPage(sql, offset, limit, context.connectionId);
+}
+
+export async function runQueryMultiRequest(
+  sql: string,
+  context: QueryExecutionContext,
+): Promise<StatementResult[]> {
+  console.info("[Query Execute · multi]", {
+    backend: context.backend,
+    connectionId: context.connectionId ?? null,
+    source: context.sourceLabel,
+    sql,
+  });
+
+  return queryService.runQueryMulti(sql, context.connectionId);
 }
 
 export async function runExplainRequest(

@@ -1,6 +1,7 @@
 import { invokeCommand } from "./tauriService";
 import {
   ConnectDatabaseParams,
+  ConnectionSchema,
   DatabaseConnectionInfo,
   DatabaseSchemaEntry,
 } from "../models/database";
@@ -26,6 +27,18 @@ export function connectSqliteDatabase(
   });
 }
 
+/** Verify a connection string is reachable without registering it. Resolves on
+ * success, rejects with the backend error message on failure. */
+export function testConnection(
+  databaseType: ConnectDatabaseParams["databaseType"],
+  connectionString: string,
+): Promise<void> {
+  return invokeCommand<void>("test_connection", {
+    databaseType,
+    connectionString,
+  });
+}
+
 export function listDatabaseConnections(): Promise<DatabaseConnectionInfo[]> {
   return invokeCommand<DatabaseConnectionInfo[]>("list_database_connections");
 }
@@ -44,4 +57,8 @@ export function listDatabaseSchemaTree(connectionId: string): Promise<DatabaseSc
   return invokeCommand<DatabaseSchemaEntry[]>("list_database_schema_tree", {
     connectionId,
   });
+}
+
+export function getConnectionSchema(connectionId: string): Promise<ConnectionSchema> {
+  return invokeCommand<ConnectionSchema>("get_connection_schema", { connectionId });
 }

@@ -19,6 +19,7 @@ import { SavedQueriesPanel } from "../components/SavedQueriesPanel";
 import { SidebarSection } from "../state/uiStore";
 import { useMainLayoutViewModel } from "../view-models/useMainLayoutViewModel";
 import { cn } from "../utils/formatters";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
 
 const NAV_ITEMS: { id: SidebarSection; icon: React.ReactNode; label: string }[] = [
   { id: "datasets", icon: <Database size={18} />, label: "Datasets" },
@@ -37,29 +38,29 @@ export function MainLayout() {
   } = useMainLayoutViewModel();
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-surface-0">
+    <div className="flex flex-col h-screen overflow-hidden bg-background">
       {/* Title bar */}
-      <header className="flex-shrink-0 h-10 flex items-center justify-between gap-2 px-3 bg-surface-1 border-b border-border select-none">
+      <header className="flex-shrink-0 h-10 flex items-center justify-between gap-2 px-3 bg-card border-b border-border select-none">
         {/* Left: app name + sidebar toggle */}
         <div className="flex items-center gap-3">
-          <button onClick={toggleSidebar} className="btn-ghost p-1">
+          <button onClick={toggleSidebar} className="btn-ghost p-1" aria-label="Toggle sidebar" title="Toggle sidebar">
             <Menu size={15} />
           </button>
           <div className="flex items-center gap-1.5">
-            <span className="text-accent-blue font-bold text-sm tracking-tight">Arrow</span>
-            <span className="text-text-primary font-semibold text-sm tracking-tight">Lens</span>
+            <span className="text-primary font-bold text-sm tracking-tight">Arrow</span>
+            <span className="text-foreground font-semibold text-sm tracking-tight">Lens</span>
           </div>
         </div>
 
         {/* Center: command palette trigger */}
         <button
           onClick={openCommandPalette}
-          className="flex items-center gap-2 px-3 py-1 rounded bg-surface-3 border border-border text-text-muted text-xs hover:border-border-strong hover:text-text-secondary transition-colors"
+          className="flex items-center gap-2 px-3 py-1 rounded bg-muted border border-border text-muted-foreground text-xs hover:border-border-strong hover:text-foreground/80 transition-colors"
           style={{ width: 220 }}
         >
           <Command size={12} />
           <span>Search commands…</span>
-          <kbd className="ml-auto text-xs bg-surface-4 px-1 rounded font-mono">⌘K</kbd>
+          <kbd className="ml-auto text-xs bg-accent px-1 rounded font-mono">⌘K</kbd>
         </button>
 
         {/* Right: import */}
@@ -72,25 +73,33 @@ export function MainLayout() {
       {/* Main area */}
       <div className="flex flex-1 min-h-0">
         {/* Activity bar */}
-        <nav className="flex-shrink-0 w-11 flex flex-col py-1 bg-surface-1 border-r border-border">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => {
-                setSidebarSection(item.id);
-                if (!isSidebarOpen) toggleSidebar();
-              }}
-              className={cn(
-                "relative flex justify-center py-3 border-l-2 transition-colors",
-                sidebarSection === item.id && isSidebarOpen
-                  ? "text-text-primary border-accent-blue"
-                  : "text-text-muted border-transparent hover:text-text-secondary hover:bg-surface-3/50",
-              )}
-              title={item.label}
-            >
-              {item.icon}
-            </button>
-          ))}
+        <nav className="flex-shrink-0 w-11 flex flex-col py-1 bg-card border-r border-border">
+          <TooltipProvider delay={300}>
+            {NAV_ITEMS.map((item) => (
+              <Tooltip key={item.id}>
+                <TooltipTrigger
+                  render={
+                    <button
+                      onClick={() => {
+                        setSidebarSection(item.id);
+                        if (!isSidebarOpen) toggleSidebar();
+                      }}
+                      aria-label={item.label}
+                      className={cn(
+                        "relative flex justify-center py-3 border-l-2 outline-none transition-colors focus-visible:border-ring",
+                        sidebarSection === item.id && isSidebarOpen
+                          ? "text-foreground border-primary"
+                          : "text-muted-foreground border-transparent hover:text-foreground/80 hover:bg-muted/50",
+                      )}
+                    >
+                      {item.icon}
+                    </button>
+                  }
+                />
+                <TooltipContent side="right">{item.label}</TooltipContent>
+              </Tooltip>
+            ))}
+          </TooltipProvider>
         </nav>
 
         {/* Resizable layout: sidebar + main */}
@@ -102,14 +111,14 @@ export function MainLayout() {
                 defaultSize={22}
                 minSize={15}
                 maxSize={40}
-                className="bg-surface-1 border-r border-border overflow-hidden"
+                className="bg-card border-r border-border overflow-hidden"
               >
                 <div className="h-full overflow-y-auto">
                   {sidebarSection === "datasets" && <DatasetExplorer />}
                   {sidebarSection === "history" && (
                     <div className="flex flex-col h-full">
                       <div className="px-3 py-2 border-b border-border flex-shrink-0">
-                        <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                           Query History
                         </span>
                       </div>
@@ -121,7 +130,7 @@ export function MainLayout() {
                   {sidebarSection === "saved" && (
                     <div className="flex flex-col h-full">
                       <div className="px-3 py-2 border-b border-border flex-shrink-0">
-                        <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                           Saved Queries
                         </span>
                       </div>
@@ -130,7 +139,7 @@ export function MainLayout() {
                   )}
                 </div>
               </Panel>
-              <PanelResizeHandle className="w-1 hover:bg-accent-blue/40 transition-colors cursor-col-resize bg-border/20" />
+              <PanelResizeHandle className="w-1 hover:bg-primary/40 transition-colors cursor-col-resize bg-border/20" />
             </>
           )}
 

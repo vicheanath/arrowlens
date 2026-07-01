@@ -5,6 +5,8 @@ import {
   loadQueryHistory,
   resolveQueryExecutionContext,
   runExplainRequest,
+  runQueryMultiRequest,
+  runQueryPageRequest,
   runQueryRequest,
   startStreamingQueryRequest,
 } from "./queryRuntime";
@@ -18,6 +20,8 @@ export function useQueryRuntime() {
       resolveExecutionContext: (connectionIdOverride?: string | null) =>
         resolveQueryExecutionContext(activeSource, connectionIdOverride),
       runQueryRequest,
+      runQueryMultiRequest,
+      runQueryPageRequest,
       runExplainRequest,
       startStreamingQueryRequest,
       attachStreamingListeners,

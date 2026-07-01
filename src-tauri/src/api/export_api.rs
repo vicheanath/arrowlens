@@ -2,9 +2,12 @@ use std::sync::Arc;
 
 use tauri::State;
 
+use crate::engine::database_executor::DatabaseExecutor;
+use crate::engine::database_registry::DatabaseRegistry;
 use crate::engine::dataset_registry::DatasetRegistry;
 use crate::engine::query_engine::QueryEngine;
 use crate::error::{AppError, Result};
+use crate::streaming::result_serializer::QueryResult;
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -15,26 +18,43 @@ pub enum ExportFormat {
 }
 
 /// Export the results of a SQL query to a file in the chosen format.
+///
+/// Routes to the same backend the query would run against — an external
+/// database when `connection_id` is set, otherwise DataFusion on loaded
+/// datasets — and exports the FULL result set (no display row cap).
 /// Returns the number of rows exported.
 #[tauri::command]
 pub async fn export_query_results(
     sql: String,
     dest_path: String,
     format: ExportFormat,
+    connection_id: Option<String>,
     registry: State<'_, Arc<DatasetRegistry>>,
+    db_registry: State<'_, Arc<DatabaseRegistry>>,
 ) -> Result<u64> {
     if sql.trim().is_empty() {
         return Err(AppError::QuerySyntaxError("Query cannot be empty".to_string()));
     }
 
-    let engine = QueryEngine::new(registry.inner().clone());
-    let result = engine.execute_query(&sql).await?;
+    let result = match connection_id {
+        Some(id) => {
+            let executor = DatabaseExecutor::from_registry(db_registry.inner().clone(), &id)?;
+            executor.fetch_all(&sql).await?
+        }
+        None => QueryEngine::new(registry.inner().clone()).execute_query(&sql).await?,
+    };
     let row_count = result.row_count as u64;
 
     match format {
         ExportFormat::Csv => export_as_csv(&result, &dest_path).await?,
         ExportFormat::Json => export_as_json(&result, &dest_path).await?,
-        ExportFormat::Parquet => export_as_parquet_via_csv(&result, &dest_path).await?,
+        ExportFormat::Parquet => {
+            // Parquet writing is CPU + blocking I/O — run off the async runtime.
+            let path = dest_path.clone();
+            tokio::task::spawn_blocking(move || export_result_as_parquet(&result, &path))
+                .await
+                .map_err(|e| AppError::ExportError(format!("export task failed: {e}")))??;
+        }
     }
 
     Ok(row_count)
@@ -102,36 +122,118 @@ async fn export_as_json(
     Ok(())
 }
 
-/// Export as Parquet by first writing CSV then using DataFusion to convert.
-/// This avoids a complex direct-Parquet writer dependency.
-async fn export_as_parquet_via_csv(
-    result: &crate::streaming::result_serializer::QueryResult,
-    path: &str,
-) -> Result<()> {
-    use datafusion::prelude::*;
-    use datafusion::dataframe::DataFrameWriteOptions;
+/// Export a QueryResult directly to Parquet, preserving JSON-decoded types
+/// (numbers stay numeric, booleans stay boolean) instead of round-tripping
+/// through CSV. Column types are inferred per column from the actual values:
+/// integer, float, boolean, or — for anything else (text, dates, uuids) —
+/// string.
+fn export_result_as_parquet(result: &QueryResult, path: &str) -> Result<()> {
+    use std::fs::File;
 
-    // Write CSV to a temp file first
-    let tmp_csv = format!("{}.tmp_export.csv", path);
-    export_as_csv(result, &tmp_csv).await?;
+    use arrow_array::{
+        ArrayRef, BooleanArray, Float64Array, Int64Array, RecordBatch, StringArray,
+    };
+    use arrow_schema::{DataType, Field, Schema};
+    use datafusion::parquet::arrow::ArrowWriter;
+    use serde_json::Value;
 
-    // Read CSV with DataFusion then write Parquet
-    let ctx = SessionContext::new();
-    ctx.register_csv("_export", &tmp_csv, CsvReadOptions::new().has_header(true))
-        .await
+    if result.columns.is_empty() {
+        // Degenerate result with no columns — write an empty file.
+        File::create(path).map_err(|e| AppError::ExportError(e.to_string()))?;
+        return Ok(());
+    }
+
+    let mut arrays: Vec<ArrayRef> = Vec::with_capacity(result.columns.len());
+    let mut fields: Vec<Field> = Vec::with_capacity(result.columns.len());
+
+    for (col_idx, col_name) in result.columns.iter().enumerate() {
+        // Classify the column from its non-null values.
+        let mut any_value = false;
+        let mut all_bool = true;
+        let mut all_int = true;
+        let mut has_float = false;
+        for row in &result.rows {
+            match row.get(col_idx) {
+                None | Some(Value::Null) => {}
+                Some(Value::Number(n)) => {
+                    any_value = true;
+                    all_bool = false;
+                    if n.as_i64().is_none() {
+                        has_float = true;
+                    }
+                }
+                Some(Value::Bool(_)) => {
+                    any_value = true;
+                    all_int = false;
+                }
+                Some(_) => {
+                    any_value = true;
+                    all_int = false;
+                    all_bool = false;
+                }
+            }
+        }
+
+        let (array, dtype): (ArrayRef, DataType) = if any_value && all_bool {
+            let values: Vec<Option<bool>> = result
+                .rows
+                .iter()
+                .map(|r| match r.get(col_idx) {
+                    Some(Value::Bool(b)) => Some(*b),
+                    _ => None,
+                })
+                .collect();
+            (Arc::new(BooleanArray::from(values)), DataType::Boolean)
+        } else if any_value && all_int && !has_float {
+            let values: Vec<Option<i64>> = result
+                .rows
+                .iter()
+                .map(|r| match r.get(col_idx) {
+                    Some(Value::Number(n)) => n.as_i64(),
+                    _ => None,
+                })
+                .collect();
+            (Arc::new(Int64Array::from(values)), DataType::Int64)
+        } else if any_value && has_float {
+            let values: Vec<Option<f64>> = result
+                .rows
+                .iter()
+                .map(|r| match r.get(col_idx) {
+                    Some(Value::Number(n)) => n.as_f64(),
+                    _ => None,
+                })
+                .collect();
+            (Arc::new(Float64Array::from(values)), DataType::Float64)
+        } else {
+            let values: Vec<Option<String>> = result
+                .rows
+                .iter()
+                .map(|r| match r.get(col_idx) {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(s)) => Some(s.clone()),
+                    Some(other) => Some(other.to_string()),
+                })
+                .collect();
+            (Arc::new(StringArray::from(values)), DataType::Utf8)
+        };
+
+        arrays.push(array);
+        fields.push(Field::new(col_name.clone(), dtype, true));
+    }
+
+    let schema = Arc::new(Schema::new(fields));
+    let batch = RecordBatch::try_new(schema.clone(), arrays)
         .map_err(|e| AppError::ExportError(e.to_string()))?;
 
-    let df = ctx
-        .sql("SELECT * FROM _export")
-        .await
+    let file = File::create(path).map_err(|e| AppError::ExportError(e.to_string()))?;
+    let mut writer = ArrowWriter::try_new(file, schema, None)
         .map_err(|e| AppError::ExportError(e.to_string()))?;
-
-    df.write_parquet(path, DataFrameWriteOptions::new(), None)
-        .await
+    writer
+        .write(&batch)
         .map_err(|e| AppError::ExportError(e.to_string()))?;
-
-    // Remove temp CSV
-    let _ = tokio::fs::remove_file(&tmp_csv).await;
+    writer
+        .close()
+        .map_err(|e| AppError::ExportError(e.to_string()))?;
 
     Ok(())
 }

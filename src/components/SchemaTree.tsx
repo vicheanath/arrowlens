@@ -34,7 +34,7 @@ export function SchemaTree({
 
   if (datasets.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-8 px-4 text-center text-text-muted">
+      <div className="flex flex-col items-center justify-center py-8 px-4 text-center text-muted-foreground">
         <Database size={28} className="mb-2 opacity-50" />
         <p className="text-sm">No datasets loaded</p>
         <p className="text-xs mt-1 opacity-60">Import a CSV, Parquet, or JSON file to start</p>
@@ -56,15 +56,15 @@ export function SchemaTree({
               className={cn(
                 "w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-sm text-left transition-colors",
                 isSelected
-                  ? "bg-accent-blue/15 text-accent-blue"
-                  : "text-text-secondary hover:bg-surface-4 hover:text-text-primary"
+                  ? "bg-primary/15 text-primary"
+                  : "text-foreground/80 hover:bg-accent hover:text-foreground"
               )}
               onClick={() => {
                 onSelect(ds.id);
                 toggle(ds.id);
               }}
             >
-              <span className="flex-shrink-0 text-text-muted">
+              <span className="flex-shrink-0 text-muted-foreground">
                 {isExpanded ? (
                   <ChevronDown size={14} />
                 ) : (
@@ -74,7 +74,7 @@ export function SchemaTree({
               <Table size={14} className="flex-shrink-0" />
               <span className="font-medium text-truncate flex-1">{ds.name}</span>
               {ds.row_count !== null && (
-                <span className="text-xs text-text-muted font-mono flex-shrink-0">
+                <span className="text-xs text-muted-foreground font-mono flex-shrink-0">
                   {ds.row_count.toLocaleString()}
                 </span>
               )}
@@ -89,7 +89,7 @@ export function SchemaTree({
                   return (
                     <button
                       key={field.name}
-                      className="w-full flex items-center gap-2 px-1.5 py-1 rounded text-xs text-left text-text-muted hover:text-text-primary hover:bg-surface-4 transition-colors group"
+                      className="w-full flex items-center gap-2 px-1.5 py-1 rounded text-xs text-left text-muted-foreground hover:text-foreground hover:bg-accent transition-colors group"
                       onClick={() => onColumnClick?.(ds.name, field.name)}
                       title={`${field.data_type}${field.nullable ? " | nullable" : ""}`}
                     >
@@ -99,7 +99,7 @@ export function SchemaTree({
                         {shortTypeName(field.data_type)}
                       </span>
                       {field.nullable && (
-                        <span className="text-text-muted opacity-0 group-hover:opacity-60 text-xs">?</span>
+                        <span className="text-muted-foreground opacity-0 group-hover:opacity-60 text-xs">?</span>
                       )}
                     </button>
                   );
@@ -108,7 +108,7 @@ export function SchemaTree({
             )}
 
             {isExpanded && !schema && (
-              <div className="ml-6 py-1 text-xs text-text-muted italic">
+              <div className="ml-6 py-1 text-xs text-muted-foreground italic">
                 Loading schema…
               </div>
             )}

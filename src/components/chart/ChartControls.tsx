@@ -57,7 +57,7 @@ export function ChartControls({
           <button
             key={t}
             onClick={() => setChartType(t)}
-            className={cn("btn text-xs capitalize", chartType === t ? "bg-accent-blue/20 text-accent-blue" : "btn-ghost")}
+            className={cn("btn text-xs capitalize", chartType === t ? "bg-primary/20 text-primary" : "btn-ghost")}
           >
             {t}
           </button>
@@ -66,7 +66,7 @@ export function ChartControls({
 
       <div className="h-4 w-px bg-border" />
 
-      <label className="flex items-center gap-1.5 text-xs text-text-muted">
+      <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
         X
         <select value={xAxis} onChange={(e) => onChangeXAxis(e.target.value)} className="input text-xs py-0.5">
           {allCols.map((c) => (
@@ -78,7 +78,7 @@ export function ChartControls({
       </label>
 
       {chartType !== "pie" && (
-        <label className="flex items-center gap-1.5 text-xs text-text-muted">
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           Y
           <select value={yAxis} onChange={(e) => onChangeYAxis(e.target.value)} className="input text-xs py-0.5">
             {yAxisOptions.map((c) => (
@@ -95,7 +95,7 @@ export function ChartControls({
       </button>
 
       {supportsAggregation && (
-        <label className="flex items-center gap-1.5 text-xs text-text-muted">
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           Aggregate
           <select
             value={aggregateMode}
@@ -112,7 +112,7 @@ export function ChartControls({
         </label>
       )}
 
-      <label className="flex items-center gap-1.5 text-xs text-text-muted">
+      <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
         Sort
         <select
           value={sortMode}
@@ -127,7 +127,7 @@ export function ChartControls({
         </select>
       </label>
 
-      <label className="flex items-center gap-1.5 text-xs text-text-muted">
+      <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
         Top
         <select
           value={String(topN)}
@@ -147,10 +147,10 @@ export function ChartControls({
       </button>
 
       {!hasRenderableData && (
-        <span className="text-xs text-accent-amber">No numeric data for selected axis</span>
+        <span className="text-xs text-warning">No numeric data for selected axis</span>
       )}
 
-      <span className="text-xs text-text-muted ml-auto">
+      <span className="text-xs text-muted-foreground ml-auto">
         {pointsCount.toLocaleString()} / {maxInputPoints.toLocaleString()} points
       </span>
     </div>

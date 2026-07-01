@@ -80,16 +80,26 @@ export function ChartCanvas({ chartType, data, pieData }: ChartCanvasProps) {
           </LineChart>
         );
 
-      case "scatter":
+      case "scatter": {
+        // Use a numeric X axis when every X value parses as a number;
+        // otherwise fall back to the categorical index so points still plot.
+        const numericPoints = data
+          .map((d) => ({ x: Number(d.x), y: d.y }))
+          .filter((d) => Number.isFinite(d.x));
+        const useNumericX = data.length > 0 && numericPoints.length === data.length;
+        const scatterPoints = useNumericX
+          ? numericPoints
+          : data.map((d, i) => ({ x: i, y: d.y }));
         return (
           <ScatterChart {...commonProps}>
             <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
-            <XAxis dataKey="x" {...AXIS_PROPS} />
-            <YAxis dataKey="y" {...AXIS_PROPS} />
-            <Tooltip contentStyle={TOOLTIP_STYLE} />
-            <Scatter data={data} fill={CHART_COLORS[0]} />
+            <XAxis dataKey="x" type="number" {...AXIS_PROPS} />
+            <YAxis dataKey="y" type="number" {...AXIS_PROPS} />
+            <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ strokeDasharray: "3 3" }} />
+            <Scatter data={scatterPoints} fill={CHART_COLORS[0]} />
           </ScatterChart>
         );
+      }
 
       case "pie":
         return (
@@ -101,7 +111,7 @@ export function ChartCanvas({ chartType, data, pieData }: ChartCanvasProps) {
               cx="50%"
               cy="50%"
               outerRadius="70%"
-              label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
+              label={({ name, percent }) => `${name}: ${((percent ?? 0) * 100).toFixed(1)}%`}
               labelLine={{ stroke: "#6c7086" }}
             >
               {pieData.map((item, index) => (

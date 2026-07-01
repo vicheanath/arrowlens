@@ -46,6 +46,10 @@ pub enum ErrorCode {
     // Export errors
     ExportError,
 
+    // AI errors
+    AiError,
+    AiNotConfigured,
+
     // Generic error
     InternalError,
 }
@@ -124,6 +128,12 @@ pub enum AppError {
     #[error("Export error: {0}")]
     ExportError(String),
 
+    #[error("AI error: {0}")]
+    AiError(String),
+
+    #[error("AI not configured: {0}")]
+    AiNotConfigured(String),
+
     #[error("Internal error: {0}")]
     Internal(String),
 }
@@ -192,11 +202,22 @@ impl AppError {
                 format!("Database connection error: {}", msg),
                 Some("Check database credentials and network connectivity.".to_string()),
             ),
-            AppError::DatabaseQueryError(msg) => (
-                ErrorCode::DatabaseQueryError,
-                format!("Database query error: {}", msg),
-                Some("Verify the SQL syntax and schema against the connected database.".to_string()),
-            ),
+            AppError::DatabaseQueryError(msg) => {
+                let suggestion = if msg.contains("no such module") {
+                    // SQLite virtual table backed by a module not built into the
+                    // app (e.g. a vendor-specific `USING SomeModule(...)`).
+                    "This table is backed by a custom SQLite virtual-table module that isn't \
+                     available in ArrowLens, so its contents can't be read. The other tables \
+                     in this database still work."
+                } else {
+                    "Verify the SQL syntax and schema against the connected database."
+                };
+                (
+                    ErrorCode::DatabaseQueryError,
+                    format!("Database query error: {}", msg),
+                    Some(suggestion.to_string()),
+                )
+            }
             AppError::OutOfMemory => (
                 ErrorCode::OutOfMemory,
                 "Out of memory".to_string(),
@@ -216,6 +237,29 @@ impl AppError {
                 ErrorCode::ExportError,
                 format!("Export failed: {}", msg),
                 Some("Ensure the destination path is writable and has enough disk space.".to_string()),
+            ),
+            AppError::AiError(msg) => {
+                // llama.cpp-based local servers (Ollama, LM Studio, vLLM, …)
+                // report an overflowed context window with wording like
+                // "n_keep >= n_ctx" or "context length" — give a specific,
+                // actionable suggestion instead of the generic one.
+                let lower = msg.to_lowercase();
+                let is_context_overflow = lower.contains("context length")
+                    || lower.contains("n_ctx")
+                    || (lower.contains("context") && lower.contains("token"));
+                let suggestion = if is_context_overflow {
+                    "This model's context window is too small for the current prompt. Try lowering \
+                     'Max tables in context' in AI Settings, use a model with a larger context window, \
+                     or (for a local server) increase its configured context length."
+                } else {
+                    "Check your AI provider, model, network connection, and API key in AI settings."
+                };
+                (ErrorCode::AiError, format!("AI request failed: {}", msg), Some(suggestion.to_string()))
+            }
+            AppError::AiNotConfigured(msg) => (
+                ErrorCode::AiNotConfigured,
+                format!("AI is not configured: {}", msg),
+                Some("Open AI settings, enable AI, choose a provider, and add an API key.".to_string()),
             ),
             AppError::IoError(_) => (
                 ErrorCode::FileAccessDenied,

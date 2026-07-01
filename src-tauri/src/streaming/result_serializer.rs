@@ -9,6 +9,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 
+/// Maximum number of rows materialized for a non-streaming query result, shared
+/// by every execution path (DataFusion datasets and external databases). Results
+/// larger than this are capped and flagged `truncated`; use export or the
+/// streaming path to retrieve the full set. Kept high enough to be useful for
+/// exploration while bounding the cost of JSON-serializing the result across the
+/// Tauri bridge.
+pub const MAX_RESULT_ROWS: usize = 50_000;
+
 /// Fully materialized query result for non-streamed queries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryResult {
@@ -17,6 +25,10 @@ pub struct QueryResult {
     pub rows: Vec<Vec<serde_json::Value>>,
     pub row_count: usize,
     pub elapsed_ms: u64,
+    /// True when the result was capped at the display row limit and more rows
+    /// exist on the source (export to retrieve the full set).
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 /// Serialize a list of RecordBatches into a QueryResult.
@@ -28,6 +40,7 @@ pub fn serialize_batches(batches: &[RecordBatch], elapsed_ms: u64) -> Result<Que
             rows: vec![],
             row_count: 0,
             elapsed_ms,
+            truncated: false,
         });
     }
 
@@ -52,6 +65,7 @@ pub fn serialize_batches(batches: &[RecordBatch], elapsed_ms: u64) -> Result<Que
         rows: all_rows,
         row_count,
         elapsed_ms,
+        truncated: false,
     })
 }
 

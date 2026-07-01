@@ -2,7 +2,7 @@
 
 export const COL_WIDTH = 160;
 export const ROW_HEIGHT = 32;
-export const HEADER_HEIGHT = 56;
+export const HEADER_HEIGHT = 46;
 export const FOOTER_HEIGHT = 24;
 export const STATUS_HEIGHT = 28;
 export const MAX_COL_WIDTH = 320;
@@ -21,9 +21,9 @@ export interface CellPosition {
   columnIndex: number;
 }
 
-/** A staged edit waiting to be commited via "Save Changes". */
+/** A staged edit waiting to be commited via "Save Changes". `null` = SQL NULL. */
 export interface PendingEdit {
   rowIndex: number;
   columnIndex: number;
-  value: string;
+  value: string | null;
 }

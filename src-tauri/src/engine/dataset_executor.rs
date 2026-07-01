@@ -27,6 +27,11 @@ impl QueryExecutor for DatasetExecutor {
         engine.execute_query(sql).await
     }
 
+    async fn execute_page(&self, sql: &str, offset: usize, limit: usize) -> Result<QueryResult> {
+        let engine = QueryEngine::new(self.registry.clone());
+        engine.execute_query_page(sql, offset, limit).await
+    }
+
     async fn execute_streaming(
         &self,
         app: AppHandle,

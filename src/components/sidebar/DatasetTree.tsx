@@ -14,6 +14,7 @@ import { DatasetInfo, DatasetSchema } from "../../models/dataset";
 import { getTypeCategory } from "../../models/dataset";
 import { TYPE_TAG_CLASS, shortTypeName } from "../../utils/dataTypes";
 import { LoadingSpinner } from "../LoadingSpinner";
+import { useConfirm } from "../ConfirmDialog";
 import { IconBtn, EmptyState } from "./SidebarPrimitives";
 
 export interface DatasetTreeProps {
@@ -49,6 +50,18 @@ export function DatasetTree({
   canQueryDataset,
   canStatsDataset,
 }: DatasetTreeProps) {
+  const confirm = useConfirm();
+
+  const requestRemove = async (id: string, name: string) => {
+    const ok = await confirm({
+      title: `Remove "${name}"?`,
+      description:
+        "This removes the dataset from ArrowLens. The original file on disk is not deleted.",
+      confirmLabel: "Remove",
+    });
+    if (ok) onRemove(id);
+  };
+
   if (isLoading) {
     return (
       <div className="py-5 flex justify-center">
@@ -59,7 +72,7 @@ export function DatasetTree({
 
   if (error) {
     return (
-      <div className="mx-2 my-1 px-2 py-1 text-[11px] text-accent-red bg-accent-red/10 rounded border border-accent-red/20">
+      <div className="mx-2 my-1 px-2 py-1 text-[11px] text-destructive bg-destructive/10 rounded border border-destructive/20">
         {error}
       </div>
     );
@@ -89,29 +102,29 @@ export function DatasetTree({
             <div
               className={cn(
                 "group flex items-center h-7 pl-1.5 pr-1 gap-1 cursor-pointer transition-colors",
-                "hover:bg-surface-3",
-                isActive && "bg-accent-blue/10 border-l-2 border-l-accent-blue",
+                "hover:bg-muted",
+                isActive && "bg-primary/10 border-l-2 border-l-primary",
               )}
               onClick={() => onSelect(d.id)}
               title={d.name}
             >
-              <span className="p-0.5 text-text-muted flex-shrink-0">
+              <span className="p-0.5 text-muted-foreground flex-shrink-0">
                 {isExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
               </span>
               <TableIcon
                 size={13}
-                className={cn("flex-shrink-0", isActive ? "text-accent-blue" : "text-text-muted")}
+                className={cn("flex-shrink-0", isActive ? "text-primary" : "text-muted-foreground")}
               />
               <span
                 className={cn(
                   "flex-1 text-xs truncate min-w-0",
-                  isActive ? "text-text-primary font-medium" : "text-text-secondary",
+                  isActive ? "text-foreground font-medium" : "text-foreground/80",
                 )}
               >
                 {d.name}
               </span>
               {d.row_count !== null && (
-                <span className="text-[10px] text-text-muted font-mono opacity-0 group-hover:opacity-50 flex-shrink-0">
+                <span className="text-[10px] text-muted-foreground font-mono opacity-0 group-hover:opacity-50 flex-shrink-0">
                   {d.row_count.toLocaleString()}
                 </span>
               )}
@@ -130,7 +143,7 @@ export function DatasetTree({
                   disabled={!canStats}
                 />
                 <IconBtn
-                  onClick={(e) => { e.stopPropagation(); onRemove(d.id); }}
+                  onClick={(e) => { e.stopPropagation(); void requestRemove(d.id, d.name); }}
                   title="Remove dataset" icon={<Trash2 size={11} />} variant="red"
                 />
               </div>
@@ -147,7 +160,7 @@ export function DatasetTree({
                         key={field.name}
                         className={cn(
                           "flex items-center h-6 pl-3 pr-2 gap-2",
-                          canQuery ? "hover:bg-surface-3 cursor-pointer" : "opacity-60 cursor-not-allowed",
+                          canQuery ? "hover:bg-muted cursor-pointer" : "opacity-60 cursor-not-allowed",
                         )}
                         onClick={() => {
                           if (!canQuery) return;
@@ -155,8 +168,8 @@ export function DatasetTree({
                         }}
                         title={`${field.data_type}${field.nullable ? " · nullable" : ""}`}
                       >
-                        <Columns size={11} className="flex-shrink-0 text-text-muted opacity-40" />
-                        <span className="flex-1 text-[11px] text-text-muted truncate font-mono">
+                        <Columns size={11} className="flex-shrink-0 text-muted-foreground opacity-40" />
+                        <span className="flex-1 text-[11px] text-muted-foreground truncate font-mono">
                           {field.name}
                         </span>
                         <span className={cn("flex-shrink-0 text-[10px]", tagCls)}>
@@ -167,7 +180,7 @@ export function DatasetTree({
                   })}
                 </div>
               ) : isActive ? (
-                <div className="ml-[22px] pl-3 py-1.5 flex items-center gap-1.5 text-[11px] text-text-muted">
+                <div className="ml-[22px] pl-3 py-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <LoadingSpinner size={10} /> Loading schema…
                 </div>
               ) : null
